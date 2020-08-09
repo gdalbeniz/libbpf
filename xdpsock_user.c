@@ -10,6 +10,7 @@
 #include <linux/if_link.h>
 #include <linux/if_xdp.h>
 #include <linux/if_ether.h>
+
 #include <locale.h>
 #include <net/ethernet.h>
 #include <net/if.h>
@@ -26,56 +27,53 @@
 #include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 #include "libbpf.h"
+#include "libbpf_internal.h"
 #include "xsk.h"
-#include <bpf/bpf.h>
+#include "bpf.h"
 
-#ifndef SOL_XDP
-#define SOL_XDP 283
-#endif
+#include "sv_frames.h"
 
-#ifndef AF_XDP
-#define AF_XDP 44
-#endif
+// #ifndef SOL_XDP
+// #define SOL_XDP 283
+// #endif
 
-#ifndef PF_XDP
-#define PF_XDP AF_XDP
-#endif
+// #ifndef AF_XDP
+// #define AF_XDP 44
+// #endif
 
-#define NUM_FRAMES (4 * 1024)
-#define BATCH_SIZE 64
+// #ifndef PF_XDP
+// #define PF_XDP AF_XDP
+// #endif
+
+#define NUM_FRAMES (4000)
+#define BATCH_SIZE 128
 
 #define DEBUG_HEXDUMP 0
 #define MAX_SOCKS 8
 
-// typedef __u64 u64;
-// typedef __u32 u32;
+
 
 static unsigned long prev_time;
 
-enum benchmark_type {
-	BENCH_RXDROP = 0,
-	BENCH_TXONLY = 1,
-	BENCH_L2FWD = 2,
-};
-
-static enum benchmark_type opt_bench = BENCH_RXDROP;
-static u32 opt_xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST;
+static int opt_test;
+static uint32_t opt_xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST;
 static const char *opt_if = "";
 static int opt_ifindex;
 static int opt_queue;
 static int opt_poll;
 static int opt_interval = 1;
-static u32 opt_xdp_bind_flags = XDP_USE_NEED_WAKEUP;
-static u32 opt_umem_flags;
+static uint32_t opt_xdp_bind_flags = XDP_USE_NEED_WAKEUP;
+static uint32_t opt_umem_flags;
 static int opt_unaligned_chunks;
 static int opt_mmap_flags;
-static u32 opt_xdp_bind_flags;
+static uint32_t opt_xdp_bind_flags;
 static int opt_xsk_frame_size = XSK_UMEM__DEFAULT_FRAME_SIZE;
 static int opt_timeout = 1000;
 static bool opt_need_wakeup = true;
-static __u32 prog_id;
+static uint32_t prog_id;
 
 struct xsk_umem_info {
 	struct xsk_ring_prod fq;
@@ -93,7 +91,7 @@ struct xsk_socket_info {
 	unsigned long tx_npkts;
 	unsigned long prev_rx_npkts;
 	unsigned long prev_tx_npkts;
-	u32 outstanding_tx;
+	uint32_t outstanding_tx;
 };
 
 static int num_socks;
@@ -110,13 +108,6 @@ static unsigned long get_nsecs(void)
 static void print_benchmark(bool running)
 {
 	const char *bench_str = "INVALID";
-
-	if (opt_bench == BENCH_RXDROP)
-		bench_str = "rxdrop";
-	else if (opt_bench == BENCH_TXONLY)
-		bench_str = "txonly";
-	else if (opt_bench == BENCH_L2FWD)
-		bench_str = "l2fwd";
 
 	printf("%s:%d %s ", opt_if, opt_queue, bench_str);
 	if (opt_xdp_flags & XDP_FLAGS_SKB_MODE)
@@ -179,7 +170,7 @@ static void *poller(void *arg)
 
 static void remove_xdp_program(void)
 {
-	__u32 curr_prog_id = 0;
+	uint32_t curr_prog_id = 0;
 
 	if (bpf_get_link_xdp_id(opt_ifindex, &curr_prog_id, opt_xdp_flags)) {
 		printf("bpf_get_link_xdp_id failed\n");
@@ -217,70 +208,18 @@ static void __exit_with_error(int error, const char *file, const char *func,
 	exit(EXIT_FAILURE);
 }
 
-#define exit_with_error(error) __exit_with_error(error, __FILE__, __func__, \
-						 __LINE__)
+#define exit_with_error(error) __exit_with_error(error, __FILE__, __func__, __LINE__)
 
-static const char pkt_data[] =
-	"\x3c\xfd\xfe\x9e\x7f\x71\xec\xb1\xd7\x98\x3a\xc0\x08\x00\x45\x00"
-	"\x00\x2e\x00\x00\x00\x00\x40\x11\x88\x97\x05\x08\x07\x08\xc8\x14"
-	"\x1e\x04\x10\x92\x10\x92\x00\x1a\x6d\xa3\x34\x33\x1f\x69\x40\x6b"
-	"\x54\x59\xb6\x14\x2d\x11\x44\xbf\xaf\xd9\xbe\xaa";
 
-static void swap_mac_addresses(void *data)
+static size_t gen_eth_frame(struct xsk_umem_info *umem, uint64_t addr, uint32_t svid, uint32_t smp)
 {
-	struct ether_header *eth = (struct ether_header *)data;
-	struct ether_addr *src_addr = (struct ether_addr *)&eth->ether_shost;
-	struct ether_addr *dst_addr = (struct ether_addr *)&eth->ether_dhost;
-	struct ether_addr tmp;
-
-	tmp = *src_addr;
-	*src_addr = *dst_addr;
-	*dst_addr = tmp;
+	void *pkt_ptr = xsk_umem__get_data(umem->buffer, addr);
+	memcpy(pkt_ptr, pkt_frames[smp % FRAME_NUM], FRAME_SIZE);
+	*(uint16_t*)(pkt_ptr+SMPC_OFFSET) = htons((uint16_t)smp);
+	return 0;
 }
 
-static void hex_dump(void *pkt, size_t length, u64 addr)
-{
-	const unsigned char *address = (unsigned char *)pkt;
-	const unsigned char *line = address;
-	size_t line_size = 32;
-	unsigned char c;
-	char buf[32];
-	int i = 0;
-
-	if (!DEBUG_HEXDUMP)
-		return;
-
-	sprintf(buf, "addr=%llu", addr);
-	printf("length = %zu\n", length);
-	printf("%s | ", buf);
-	while (length-- > 0) {
-		printf("%02X ", *address++);
-		if (!(++i % line_size) || (length == 0 && i % line_size)) {
-			if (length == 0) {
-				while (i++ % line_size)
-					printf("__ ");
-			}
-			printf(" | ");	/* right close */
-			while (line < address) {
-				c = *line++;
-				printf("%c", (c < 33 || c == 255) ? 0x2E : c);
-			}
-			printf("\n");
-			if (length > 0)
-				printf("%s | ", buf);
-		}
-	}
-	printf("\n");
-}
-
-static size_t gen_eth_frame(struct xsk_umem_info *umem, u64 addr)
-{
-	memcpy(xsk_umem__get_data(umem->buffer, addr), pkt_data,
-	       sizeof(pkt_data) - 1);
-	return sizeof(pkt_data) - 1;
-}
-
-static struct xsk_umem_info *xsk_configure_umem(void *buffer, u64 size)
+static struct xsk_umem_info *xsk_configure_umem(void *buffer, uint64_t size)
 {
 	struct xsk_umem_info *umem;
 	struct xsk_umem_config cfg = {
@@ -297,8 +236,7 @@ static struct xsk_umem_info *xsk_configure_umem(void *buffer, u64 size)
 	if (!umem)
 		exit_with_error(errno);
 
-	ret = xsk_umem__create(&umem->umem, buffer, size, &umem->fq, &umem->cq,
-			       &cfg);
+	ret = xsk_umem__create(&umem->umem, buffer, size, &umem->fq, &umem->cq, &cfg);
 
 	if (ret)
 		exit_with_error(-ret);
@@ -312,7 +250,7 @@ static struct xsk_socket_info *xsk_configure_socket(struct xsk_umem_info *umem)
 	struct xsk_socket_config cfg;
 	struct xsk_socket_info *xsk;
 	int ret;
-	u32 idx;
+	uint32_t idx;
 	int i;
 
 	xsk = calloc(1, sizeof(*xsk));
@@ -349,9 +287,7 @@ static struct xsk_socket_info *xsk_configure_socket(struct xsk_umem_info *umem)
 }
 
 static struct option long_options[] = {
-	{"rxdrop", no_argument, 0, 'r'},
-	{"txonly", no_argument, 0, 't'},
-	{"l2fwd", no_argument, 0, 'l'},
+	{"test", no_argument, 0, 't'},
 	{"interface", required_argument, 0, 'i'},
 	{"queue", required_argument, 0, 'q'},
 	{"poll", no_argument, 0, 'p'},
@@ -371,9 +307,7 @@ static void usage(const char *prog)
 	const char *str =
 		"  Usage: %s [OPTIONS]\n"
 		"  Options:\n"
-		"  -r, --rxdrop		Discard all incoming packets (default)\n"
-		"  -t, --txonly		Only send packets\n"
-		"  -l, --l2fwd		MAC swap L2 forwarding\n"
+		"  -t, --test		TEST TEST TEST\n"
 		"  -i, --interface=n	Run on interface n\n"
 		"  -q, --queue=n	Use queue n (default 0)\n"
 		"  -p, --poll		Use poll syscall\n"
@@ -398,20 +332,14 @@ static void parse_command_line(int argc, char **argv)
 	opterr = 0;
 
 	for (;;) {
-		c = getopt_long(argc, argv, "Frtli:q:psSNn:czf:mu",
+		c = getopt_long(argc, argv, "Fti:q:psSNn:czf:mu", //"Frtli:q:psSNn:czf:mu"
 				long_options, &option_index);
 		if (c == -1)
 			break;
 
 		switch (c) {
-		case 'r':
-			opt_bench = BENCH_RXDROP;
-			break;
 		case 't':
-			opt_bench = BENCH_TXONLY;
-			break;
-		case 'l':
-			opt_bench = BENCH_L2FWD;
+			opt_test = 1;
 			break;
 		case 'i':
 			opt_if = optarg;
@@ -483,53 +411,11 @@ static void kick_tx(struct xsk_socket_info *xsk)
 	exit_with_error(errno);
 }
 
-static inline void complete_tx_l2fwd(struct xsk_socket_info *xsk,
-				     struct pollfd *fds)
-{
-	struct xsk_umem_info *umem = xsk->umem;
-	u32 idx_cq = 0, idx_fq = 0;
-	unsigned int rcvd;
-	size_t ndescs;
-
-	if (!xsk->outstanding_tx)
-		return;
-
-	if (!opt_need_wakeup || xsk_ring_prod__needs_wakeup(&xsk->tx))
-		kick_tx(xsk);
-
-	ndescs = (xsk->outstanding_tx > BATCH_SIZE) ? BATCH_SIZE :
-		xsk->outstanding_tx;
-
-	/* re-add completed Tx buffers */
-	rcvd = xsk_ring_cons__peek(&umem->cq, ndescs, &idx_cq);
-	if (rcvd > 0) {
-		unsigned int i;
-		int ret;
-
-		ret = xsk_ring_prod__reserve(&umem->fq, rcvd, &idx_fq);
-		while (ret != rcvd) {
-			if (ret < 0)
-				exit_with_error(-ret);
-			if (xsk_ring_prod__needs_wakeup(&umem->fq))
-				ret = poll(fds, num_socks, opt_timeout);
-			ret = xsk_ring_prod__reserve(&umem->fq, rcvd, &idx_fq);
-		}
-
-		for (i = 0; i < rcvd; i++)
-			*xsk_ring_prod__fill_addr(&umem->fq, idx_fq++) =
-				*xsk_ring_cons__comp_addr(&umem->cq, idx_cq++);
-
-		xsk_ring_prod__submit(&xsk->umem->fq, rcvd);
-		xsk_ring_cons__release(&xsk->umem->cq, rcvd);
-		xsk->outstanding_tx -= rcvd;
-		xsk->tx_npkts += rcvd;
-	}
-}
 
 static inline void complete_tx_only(struct xsk_socket_info *xsk)
 {
 	unsigned int rcvd;
-	u32 idx;
+	uint32_t idx;
 
 	if (!xsk->outstanding_tx)
 		return;
@@ -545,81 +431,16 @@ static inline void complete_tx_only(struct xsk_socket_info *xsk)
 	}
 }
 
-static void rx_drop(struct xsk_socket_info *xsk, struct pollfd *fds)
+static void tx_only(struct xsk_socket_info *xsk, uint32_t frame_nb)
 {
-	unsigned int rcvd, i;
-	u32 idx_rx = 0, idx_fq = 0;
-	int ret;
-
-	rcvd = xsk_ring_cons__peek(&xsk->rx, BATCH_SIZE, &idx_rx);
-	if (!rcvd) {
-		if (xsk_ring_prod__needs_wakeup(&xsk->umem->fq))
-			ret = poll(fds, num_socks, opt_timeout);
-		return;
-	}
-
-	ret = xsk_ring_prod__reserve(&xsk->umem->fq, rcvd, &idx_fq);
-	while (ret != rcvd) {
-		if (ret < 0)
-			exit_with_error(-ret);
-		if (xsk_ring_prod__needs_wakeup(&xsk->umem->fq))
-			ret = poll(fds, num_socks, opt_timeout);
-		ret = xsk_ring_prod__reserve(&xsk->umem->fq, rcvd, &idx_fq);
-	}
-
-	for (i = 0; i < rcvd; i++) {
-		u64 addr = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx)->addr;
-		u32 len = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx++)->len;
-		u64 orig = xsk_umem__extract_addr(addr);
-
-		addr = xsk_umem__add_offset_to_addr(addr);
-		char *pkt = xsk_umem__get_data(xsk->umem->buffer, addr);
-
-		hex_dump(pkt, len, addr);
-		*xsk_ring_prod__fill_addr(&xsk->umem->fq, idx_fq++) = orig;
-	}
-
-	xsk_ring_prod__submit(&xsk->umem->fq, rcvd);
-	xsk_ring_cons__release(&xsk->rx, rcvd);
-	xsk->rx_npkts += rcvd;
-}
-
-static void rx_drop_all(void)
-{
-	struct pollfd fds[MAX_SOCKS + 1];
-	int i, ret;
-
-	memset(fds, 0, sizeof(fds));
-
-	for (i = 0; i < num_socks; i++) {
-		fds[i].fd = xsk_socket__fd(xsks[i]->xsk);
-		fds[i].events = POLLIN;
-	}
-
-	for (;;) {
-		if (opt_poll) {
-			ret = poll(fds, num_socks, opt_timeout);
-			if (ret <= 0)
-				continue;
-		}
-
-		for (i = 0; i < num_socks; i++)
-			rx_drop(xsks[i], fds);
-	}
-}
-
-static void tx_only(struct xsk_socket_info *xsk, u32 frame_nb)
-{
-	u32 idx;
+	uint32_t idx;
 
 	if (xsk_ring_prod__reserve(&xsk->tx, BATCH_SIZE, &idx) == BATCH_SIZE) {
 		unsigned int i;
 
 		for (i = 0; i < BATCH_SIZE; i++) {
-			xsk_ring_prod__tx_desc(&xsk->tx, idx + i)->addr	=
-				(frame_nb + i) << XSK_UMEM__DEFAULT_FRAME_SHIFT;
-			xsk_ring_prod__tx_desc(&xsk->tx, idx + i)->len =
-				sizeof(pkt_data) - 1;
+			xsk_ring_prod__tx_desc(&xsk->tx, idx + i)->addr	= (frame_nb + i) << XSK_UMEM__DEFAULT_FRAME_SHIFT;
+			xsk_ring_prod__tx_desc(&xsk->tx, idx + i)->len = FRAME_SIZE;
 		}
 
 		xsk_ring_prod__submit(&xsk->tx, BATCH_SIZE);
@@ -634,7 +455,7 @@ static void tx_only(struct xsk_socket_info *xsk, u32 frame_nb)
 static void tx_only_all(void)
 {
 	struct pollfd fds[MAX_SOCKS];
-	u32 frame_nb[MAX_SOCKS] = {};
+	uint32_t frame_nb[MAX_SOCKS] = {};
 	int i, ret;
 
 	memset(fds, 0, sizeof(fds));
@@ -655,76 +476,6 @@ static void tx_only_all(void)
 
 		for (i = 0; i < num_socks; i++)
 			tx_only(xsks[i], frame_nb[i]);
-	}
-}
-
-static void l2fwd(struct xsk_socket_info *xsk, struct pollfd *fds)
-{
-	unsigned int rcvd, i;
-	u32 idx_rx = 0, idx_tx = 0;
-	int ret;
-
-	complete_tx_l2fwd(xsk, fds);
-
-	rcvd = xsk_ring_cons__peek(&xsk->rx, BATCH_SIZE, &idx_rx);
-	if (!rcvd) {
-		if (xsk_ring_prod__needs_wakeup(&xsk->umem->fq))
-			ret = poll(fds, num_socks, opt_timeout);
-		return;
-	}
-
-	ret = xsk_ring_prod__reserve(&xsk->tx, rcvd, &idx_tx);
-	while (ret != rcvd) {
-		if (ret < 0)
-			exit_with_error(-ret);
-		if (xsk_ring_prod__needs_wakeup(&xsk->tx))
-			kick_tx(xsk);
-		ret = xsk_ring_prod__reserve(&xsk->tx, rcvd, &idx_tx);
-	}
-
-	for (i = 0; i < rcvd; i++) {
-		u64 addr = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx)->addr;
-		u32 len = xsk_ring_cons__rx_desc(&xsk->rx, idx_rx++)->len;
-		u64 orig = addr;
-
-		addr = xsk_umem__add_offset_to_addr(addr);
-		char *pkt = xsk_umem__get_data(xsk->umem->buffer, addr);
-
-		swap_mac_addresses(pkt);
-
-		hex_dump(pkt, len, addr);
-		xsk_ring_prod__tx_desc(&xsk->tx, idx_tx)->addr = orig;
-		xsk_ring_prod__tx_desc(&xsk->tx, idx_tx++)->len = len;
-	}
-
-	xsk_ring_prod__submit(&xsk->tx, rcvd);
-	xsk_ring_cons__release(&xsk->rx, rcvd);
-
-	xsk->rx_npkts += rcvd;
-	xsk->outstanding_tx += rcvd;
-}
-
-static void l2fwd_all(void)
-{
-	struct pollfd fds[MAX_SOCKS];
-	int i, ret;
-
-	memset(fds, 0, sizeof(fds));
-
-	for (i = 0; i < num_socks; i++) {
-		fds[i].fd = xsk_socket__fd(xsks[i]->xsk);
-		fds[i].events = POLLOUT | POLLIN;
-	}
-
-	for (;;) {
-		if (opt_poll) {
-			ret = poll(fds, num_socks, opt_timeout);
-			if (ret <= 0)
-				continue;
-		}
-
-		for (i = 0; i < num_socks; i++)
-			l2fwd(xsks[i], fds);
 	}
 }
 
@@ -756,11 +507,12 @@ int main(int argc, char **argv)
 	umem = xsk_configure_umem(bufs, NUM_FRAMES * opt_xsk_frame_size);
 	xsks[num_socks++] = xsk_configure_socket(umem);
 
-	if (opt_bench == BENCH_TXONLY) {
+	{
 		int i;
 
-		for (i = 0; i < NUM_FRAMES; i++)
-			(void)gen_eth_frame(umem, i * opt_xsk_frame_size);
+		for (i = 0; i < NUM_FRAMES; i++) {
+			(void) gen_eth_frame(umem, i * opt_xsk_frame_size, 0, i);
+		}
 	}
 
 	signal(SIGINT, int_exit);
@@ -769,18 +521,30 @@ int main(int argc, char **argv)
 
 	setlocale(LC_ALL, "");
 
+
+	if (opt_test) {
+		libbpf_print(LIBBPF_INFO, "test\n");
+		return 0;
+	}
+
+
+
 	ret = pthread_create(&pt, NULL, poller, NULL);
 	if (ret)
 		exit_with_error(ret);
 
 	prev_time = get_nsecs();
 
-	if (opt_bench == BENCH_RXDROP)
-		rx_drop_all();
-	else if (opt_bench == BENCH_TXONLY)
-		tx_only_all();
-	else
-		l2fwd_all();
+	tx_only_all();
 
 	return 0;
+}
+
+/* this function is needed to not include libbpf.c tha needs a bunch of other dependencies too */
+void libbpf_print(enum libbpf_print_level level, const char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	vfprintf(stderr, format, args);
+	va_end(args);
 }
