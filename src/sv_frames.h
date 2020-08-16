@@ -1,5 +1,16 @@
+#ifndef __SV_FRAMES__
+#define __SV_FRAMES__
 
 #include <stdint.h>
+struct sSvConf;
+
+
+
+int32_t sv_prepare(uint8_t *samples, struct sSvConf *conf, uint32_t sv);
+
+
+
+
 
 #define FRAME_SIZE 126
 #define FRAME_NUM   80
@@ -1448,3 +1459,5 @@ static /*const*/ uint8_t pkt_frames[FRAME_NUM][FRAME_SIZE] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x04              /* ...... */
     }
 };
+
+#endif

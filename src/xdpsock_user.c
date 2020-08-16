@@ -29,8 +29,8 @@
 #include <unistd.h>
 #include <arpa/inet.h>
 
-#include "libbpf.h"
-#include "libbpf_internal.h"
+//#include "libbpf.h"
+//#include "libbpf_internal.h"
 #include "xsk.h"
 #include "bpf.h"
 
@@ -56,24 +56,25 @@
 
 
 
-static unsigned long prev_time;
+unsigned long prev_time;
 
-static int opt_test;
-static uint32_t opt_xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST;
-static const char *opt_if = "";
-static int opt_ifindex;
-static int opt_queue;
-static int opt_poll;
-static int opt_interval = 1;
-static uint32_t opt_xdp_bind_flags = XDP_USE_NEED_WAKEUP;
-static uint32_t opt_umem_flags;
-static int opt_unaligned_chunks;
-static int opt_mmap_flags;
-static uint32_t opt_xdp_bind_flags;
-static int opt_xsk_frame_size = XSK_UMEM__DEFAULT_FRAME_SIZE;
-static int opt_timeout = 1000;
-static bool opt_need_wakeup = true;
-static uint32_t prog_id;
+extern int opt_test;
+extern uint32_t opt_xdp_flags;
+extern const char *opt_if;
+extern int opt_ifindex;
+extern int opt_queue;
+extern int opt_poll;
+extern int opt_interval;
+extern uint32_t opt_xdp_bind_flags;
+extern uint32_t opt_umem_flags;
+extern int opt_unaligned_chunks;
+extern int opt_mmap_flags;
+extern uint32_t opt_xdp_bind_flags;
+extern int opt_xsk_frame_size;
+extern int opt_timeout;
+extern bool opt_need_wakeup;
+
+uint32_t prog_id;
 
 struct xsk_umem_info {
 	struct xsk_ring_prod fq;
@@ -107,7 +108,7 @@ static unsigned long get_nsecs(void)
 
 static void print_benchmark(bool running)
 {
-	const char *bench_str = "INVALID";
+	const char *bench_str = "";
 
 	printf("%s:%d %s ", opt_if, opt_queue, bench_str);
 	if (opt_xdp_flags & XDP_FLAGS_SKB_MODE)
@@ -126,7 +127,7 @@ static void print_benchmark(bool running)
 	}
 }
 
-static void dump_stats(void)
+void dump_stats(void)
 {
 	unsigned long now = get_nsecs();
 	long dt = now - prev_time;
@@ -157,16 +158,17 @@ static void dump_stats(void)
 	}
 }
 
-static void *poller(void *arg)
+void __exit_with_error(int error, const char *file, const char *func, int line)
 {
-	(void)arg;
-	for (;;) {
-		sleep(opt_interval);
-		dump_stats();
-	}
-
-	return NULL;
+	fprintf(stderr, "%s:%s:%i: errno: %d/\"%s\"\n", file, func,
+		line, error, strerror(error));
+	dump_stats();
+	cleanup_xdp();
+	exit(EXIT_FAILURE);
 }
+
+#define exit_with_error(error) __exit_with_error(error, __FILE__, __func__, __LINE__)
+
 
 static void remove_xdp_program(void)
 {
@@ -183,32 +185,6 @@ static void remove_xdp_program(void)
 	else
 		printf("program on interface changed, not removing\n");
 }
-
-static void int_exit(int sig)
-{
-	struct xsk_umem *umem = xsks[0]->umem->umem;
-
-	(void)sig;
-
-	dump_stats();
-	xsk_socket__delete(xsks[0]->xsk);
-	(void)xsk_umem__delete(umem);
-	remove_xdp_program();
-
-	exit(EXIT_SUCCESS);
-}
-
-static void __exit_with_error(int error, const char *file, const char *func,
-			      int line)
-{
-	fprintf(stderr, "%s:%s:%i: errno: %d/\"%s\"\n", file, func,
-		line, error, strerror(error));
-	dump_stats();
-	remove_xdp_program();
-	exit(EXIT_FAILURE);
-}
-
-#define exit_with_error(error) __exit_with_error(error, __FILE__, __func__, __LINE__)
 
 
 static size_t gen_eth_frame(struct xsk_umem_info *umem, uint64_t addr, uint32_t svid, uint32_t smp)
@@ -286,118 +262,6 @@ static struct xsk_socket_info *xsk_configure_socket(struct xsk_umem_info *umem)
 	return xsk;
 }
 
-static struct option long_options[] = {
-	{"test", no_argument, 0, 't'},
-	{"interface", required_argument, 0, 'i'},
-	{"queue", required_argument, 0, 'q'},
-	{"poll", no_argument, 0, 'p'},
-	{"xdp-skb", no_argument, 0, 'S'},
-	{"xdp-native", no_argument, 0, 'N'},
-	{"interval", required_argument, 0, 'n'},
-	{"zero-copy", no_argument, 0, 'z'},
-	{"copy", no_argument, 0, 'c'},
-	{"frame-size", required_argument, 0, 'f'},
-	{"no-need-wakeup", no_argument, 0, 'm'},
-	{"unaligned", no_argument, 0, 'u'},
-	{0, 0, 0, 0}
-};
-
-static void usage(const char *prog)
-{
-	const char *str =
-		"  Usage: %s [OPTIONS]\n"
-		"  Options:\n"
-		"  -t, --test		TEST TEST TEST\n"
-		"  -i, --interface=n	Run on interface n\n"
-		"  -q, --queue=n	Use queue n (default 0)\n"
-		"  -p, --poll		Use poll syscall\n"
-		"  -S, --xdp-skb=n	Use XDP skb-mod\n"
-		"  -N, --xdp-native=n	Enfore XDP native mode\n"
-		"  -n, --interval=n	Specify statistics update interval (default 1 sec).\n"
-		"  -z, --zero-copy      Force zero-copy mode.\n"
-		"  -c, --copy           Force copy mode.\n"
-		"  -m, --no-need-wakeup Turn off use of driver need wakeup flag.\n"
-		"  -f, --frame-size=n   Set the frame size (must be a power of two in aligned mode, default is %d).\n"
-		"  -u, --unaligned	Enable unaligned chunk placement\n"
-		"\n";
-	fprintf(stderr, str, prog, XSK_UMEM__DEFAULT_FRAME_SIZE);
-	exit(EXIT_FAILURE);
-}
-
-static void parse_command_line(int argc, char **argv)
-{
-	int option_index, c;
-
-	opterr = 0;
-
-	for (;;) {
-		c = getopt_long(argc, argv, "Fti:q:psSNn:czf:mu", long_options, &option_index);
-		if (c == -1)
-			break;
-
-		switch (c) {
-		case 't':
-			opt_test = 1;
-			break;
-		case 'i':
-			opt_if = optarg;
-			break;
-		case 'q':
-			opt_queue = atoi(optarg);
-			break;
-		case 'p':
-			opt_poll = 1;
-			break;
-		case 'S':
-			opt_xdp_flags |= XDP_FLAGS_SKB_MODE;
-			opt_xdp_bind_flags |= XDP_COPY;
-			break;
-		case 'N':
-			opt_xdp_flags |= XDP_FLAGS_DRV_MODE;
-			break;
-		case 'n':
-			opt_interval = atoi(optarg);
-			break;
-		case 'z':
-			opt_xdp_bind_flags |= XDP_ZEROCOPY;
-			break;
-		case 'c':
-			opt_xdp_bind_flags |= XDP_COPY;
-			break;
-		case 'u':
-			opt_umem_flags |= XDP_UMEM_UNALIGNED_CHUNK_FLAG;
-			opt_unaligned_chunks = 1;
-			opt_mmap_flags = MAP_HUGETLB;
-			break;
-		case 'F':
-			opt_xdp_flags &= ~XDP_FLAGS_UPDATE_IF_NOEXIST;
-			break;
-		case 'f':
-			opt_xsk_frame_size = atoi(optarg);
-		case 'm':
-			opt_need_wakeup = false;
-			opt_xdp_bind_flags &= ~XDP_USE_NEED_WAKEUP;
-			break;
-
-		default:
-			usage(basename(argv[0]));
-		}
-	}
-
-	opt_ifindex = if_nametoindex(opt_if);
-	if (!opt_ifindex) {
-		fprintf(stderr, "ERROR: interface \"%s\" does not exist\n",
-			opt_if);
-		usage(basename(argv[0]));
-	}
-
-	if ((opt_xsk_frame_size & (opt_xsk_frame_size - 1)) &&
-	    !opt_unaligned_chunks) {
-		fprintf(stderr, "--frame-size=%d is not a power of two\n",
-			opt_xsk_frame_size);
-		usage(basename(argv[0]));
-	}
-}
 
 static void kick_tx(struct xsk_socket_info *xsk)
 {
@@ -477,21 +341,18 @@ static void tx_only_all(void)
 	}
 }
 
-int main(int argc, char **argv)
+void cleanup_xdp(void)
 {
-	struct rlimit r = {RLIM_INFINITY, RLIM_INFINITY};
+    struct xsk_umem *umem = xsks[0]->umem->umem;
+	xsk_socket__delete(xsks[0]->xsk);
+	(void)xsk_umem__delete(umem);
+	remove_xdp_program();
+}
+
+void start_xdp(void)
+{
 	struct xsk_umem_info *umem;
-	pthread_t pt;
 	void *bufs;
-	int ret;
-
-	parse_command_line(argc, argv);
-
-	if (setrlimit(RLIMIT_MEMLOCK, &r)) {
-		fprintf(stderr, "ERROR: setrlimit(RLIMIT_MEMLOCK) \"%s\"\n",
-			strerror(errno));
-		exit(EXIT_FAILURE);
-	}
 
 	/* Reserve memory for the umem. Use hugepages if unaligned chunk mode */
 	bufs = mmap(NULL, NUM_FRAMES * opt_xsk_frame_size,
@@ -512,30 +373,10 @@ int main(int argc, char **argv)
 			(void) gen_eth_frame(umem, i * opt_xsk_frame_size, 0, i);
 		}
 	}
-
-	signal(SIGINT, int_exit);
-	signal(SIGTERM, int_exit);
-	signal(SIGABRT, int_exit);
-
-	setlocale(LC_ALL, "");
-
-
-	if (opt_test) {
-		libbpf_print(LIBBPF_INFO, "test\n");
-		return 0;
-	}
-
-
-
-	ret = pthread_create(&pt, NULL, poller, NULL);
-	if (ret)
-		exit_with_error(ret);
-
+    
 	prev_time = get_nsecs();
 
 	tx_only_all();
-
-	return 0;
 }
 
 /* this function is needed to not include libbpf.c tha needs a bunch of other dependencies too */

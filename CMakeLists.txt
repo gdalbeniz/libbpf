@@ -29,26 +29,32 @@ include_directories(
 
 set(xdpsock_sv_SRCS
    src/xdpsock_user.c
+   src/main.c
+)
+set(libbpf_SRCS
    libbpf/bpf.c
    libbpf/netlink.c
    libbpf/nlattr.c
    libbpf/xsk.c
 )
 add_executable(xdpsock_sv
+  ${libbpf_SRCS}
   ${xdpsock_sv_SRCS}
 )
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
 target_link_libraries(xdpsock_sv PRIVATE Threads::Threads)
 
-set(sv_config_SRCS
+set(sv_injector_SRCS
    ini/ini.c
    src/sv_config.c
+   src/sv_frames.c
+   src/sv_injector.c
 )
-add_executable(sv_config2
-  ${sv_config_SRCS}
+add_executable(sv_injector
+  ${sv_injector_SRCS}
 )
-target_link_libraries(sv_config2
+target_link_libraries(sv_injector
   PRIVATE m
   PRIVATE ${IEC61850_LIBRARY}
   PRIVATE ${IEC61850HAL_LIBRARY}
@@ -58,5 +64,5 @@ target_link_libraries(sv_config2
 
 install (TARGETS xdpsock_sv RUNTIME DESTINATION ${BINDIR} COMPONENT Applications)
 
-install (TARGETS sv_config2 RUNTIME DESTINATION ${BINDIR} COMPONENT Applications)
+install (TARGETS sv_injector RUNTIME DESTINATION ${BINDIR} COMPONENT Applications)
 install (FILES test.ini DESTINATION etc COMPONENT Applications)
