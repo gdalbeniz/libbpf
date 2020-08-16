@@ -45,10 +45,10 @@ set(sv_config_SRCS
    ini/ini.c
    src/sv_config.c
 )
-add_executable(sv_config
+add_executable(sv_config2
   ${sv_config_SRCS}
 )
-target_link_libraries(sv_config
+target_link_libraries(sv_config2
   PRIVATE m
   PRIVATE ${IEC61850_LIBRARY}
   PRIVATE ${IEC61850HAL_LIBRARY}
@@ -57,3 +57,6 @@ target_link_libraries(sv_config
 
 
 install (TARGETS xdpsock_sv RUNTIME DESTINATION ${BINDIR} COMPONENT Applications)
+
+install (TARGETS sv_config2 RUNTIME DESTINATION ${BINDIR} COMPONENT Applications)
+install (FILES test.ini DESTINATION etc COMPONENT Applications)
