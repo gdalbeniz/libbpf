@@ -172,11 +172,13 @@ void parse_command_line(int argc, char **argv)
 	}
 }
 
-
+unsigned long get_nsecs(void);
+extern unsigned long prev_time;
 
 static void *poller(void *arg)
 {
 	(void)arg;
+	prev_time = get_nsecs();
 	for (;;) {
 		sleep(opt_interval);
 		dump_stats();
@@ -188,11 +190,8 @@ static void *poller(void *arg)
 static void int_exit(int sig)
 {
 	(void)sig;
-
 	dump_stats();
-
 	cleanup_xdp();
-
 	exit(EXIT_SUCCESS);
 }
 
@@ -202,19 +201,11 @@ static void int_exit(int sig)
 
 int main(int argc, char **argv)
 {
-	struct rlimit r = {RLIM_INFINITY, RLIM_INFINITY};
-	pthread_t pt;
-	int ret;
 
 	parse_command_line(argc, argv);
 
-	if (setrlimit(RLIMIT_MEMLOCK, &r)) {
-		fprintf(stderr, "ERROR: setrlimit(RLIMIT_MEMLOCK) \"%s\"\n",
-			strerror(errno));
-		exit(EXIT_FAILURE);
-	}
 
-    
+	
 
 	signal(SIGINT, int_exit);
 	signal(SIGTERM, int_exit);
@@ -222,8 +213,8 @@ int main(int argc, char **argv)
 
 	setlocale(LC_ALL, "");
 
-
-	ret = pthread_create(&pt, NULL, poller, NULL);
+	pthread_t pt;
+	int ret = pthread_create(&pt, NULL, poller, NULL);
 	if (ret)
 		exit_with_error(ret);
 

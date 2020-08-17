@@ -1,6 +1,6 @@
 #include "sv_injector.h"
+#include "sv_config.h"
 #include "ini.h"
-#include "getopt.h"
 
 
 #define MATCH(a,b) (!strcmp(a?a:"", b?b:""))
@@ -178,6 +178,35 @@ static int ini_parse_handler(void* user, const char* section, const char* key, c
 	return 1; //ok
 }
 
+
+
+
+
+void printSvOpt(struct sSvOpt *opt)
+{
+	debug("************ options ************\n");
+	debug("debug %d, iface %s, ifindex %d, mode %c, cfg %s, sv_limit %d, sv_num %d\n",
+		opt->debug, opt->iface, opt->ifindex, opt->mode, opt->cfg_file, opt->sv_limit, opt->sv_num);
+	if (opt->debug) {
+		for (int i = 0; i < opt->sv_num; i++) {
+			struct sSvConf *conf = opt->sv_conf + i;
+			debug("============ [%s] ===========\n", conf->section);
+			debug("mac: %02x:%02x:%02x:%02x:%02x:%02x, vlanPrio: %d, vlanId: %d, appId: 0x%04x\n",
+				conf->mac[0], conf->mac[1], conf->mac[2], conf->mac[3], conf->mac[4], conf->mac[5], conf->vlanPrio, conf->vlanId, conf->appId);
+			debug("svId: %s, datSet: %s, confRev: %d\n", conf->svId, conf->datSet, conf->confRev);
+			debug("ia: {%.1f, %.1f, 0x%04x}, ib: {%.1f, %.1f, 0x%04x}, ic: {%.1f, %.1f, 0x%04x}, in: {%.1f, %.1f, 0x%04x}\n",
+				conf->ia_mag, conf->ia_ang, conf->ia_q, conf->ib_mag, conf->ib_ang, conf->ib_q,
+				conf->ic_mag, conf->ic_ang, conf->ic_q, conf->in_mag, conf->in_ang, conf->in_q);
+			debug("va: {%.1f, %.1f, 0x%04x}, vb: {%.1f, %.1f, 0x%04x}, vc: {%.1f, %.1f, 0x%04x}, vn: {%.1f, %.1f, 0x%04x}\n",
+				conf->va_mag, conf->va_ang, conf->va_q, conf->vb_mag, conf->vb_ang, conf->vb_q,
+				conf->vc_mag, conf->vc_ang, conf->vc_q, conf->vn_mag, conf->vn_ang, conf->vn_q);
+		}
+	}
+}
+
+
+
+
 void parse_cfg_file(struct sSvOpt *opt)
 {
 	if (opt->cfg_file == NULL) {
@@ -192,36 +221,20 @@ void parse_cfg_file(struct sSvOpt *opt)
 		printf("Bad config file (first error on line %d)!\n", ret);
 		exit(EXIT_FAILURE);
 	}
-}
-
-
-
-
-void printSvOpt(struct sSvOpt *opt)
-{
-	printf("************ options ************\n");
-	printf("debug %d, iface %s, poll %d, mode %c, limit %d, cfg %s, sv_num %d\n",
-		opt->debug, opt->iface, opt->poll, opt->mode, opt->sv_limit, opt->cfg_file, opt->sv_num);
-	if (sv_opt.debug) {
-		int num = sv_opt.sv_num;
-		if (sv_opt.sv_limit && num > sv_opt.sv_limit) {
-			num = sv_opt.sv_limit;
-		}
-		for (int i = 0; i < num; i++) {
-			struct sSvConf *conf = opt->sv_conf + i;
-			printf("============ [%s] ===========\n", conf->section);
-			printf("mac: %02x:%02x:%02x:%02x:%02x:%02x, vlanPrio: %d, vlanId: %d, appId: 0x%04x\n",
-				conf->mac[0], conf->mac[1], conf->mac[2], conf->mac[3], conf->mac[4], conf->mac[5], conf->vlanPrio, conf->vlanId, conf->appId);
-			printf("svId: %s, datSet: %s, confRev: %d\n", conf->svId, conf->datSet, conf->confRev);
-			printf("ia: {%.1f, %.1f, 0x%04x}, ib: {%.1f, %.1f, 0x%04x}, ic: {%.1f, %.1f, 0x%04x}, in: {%.1f, %.1f, 0x%04x}\n",
-				conf->ia_mag, conf->ia_ang, conf->ia_q, conf->ib_mag, conf->ib_ang, conf->ib_q,
-				conf->ic_mag, conf->ic_ang, conf->ic_q, conf->in_mag, conf->in_ang, conf->in_q);
-			printf("va: {%.1f, %.1f, 0x%04x}, vb: {%.1f, %.1f, 0x%04x}, vc: {%.1f, %.1f, 0x%04x}, vn: {%.1f, %.1f, 0x%04x}\n",
-				conf->va_mag, conf->va_ang, conf->va_q, conf->vb_mag, conf->vb_ang, conf->vb_q,
-				conf->vc_mag, conf->vc_ang, conf->vc_q, conf->vn_mag, conf->vn_ang, conf->vn_q);
-		}
+	
+	if (opt->sv_num > SV_MAX) {
+		printf("error: too many sv (%d > %d)\n",opt->sv_num, SV_MAX);
+		exit(EXIT_FAILURE);
+	} else if ((opt->sv_num >opt->sv_limit) && (opt->sv_limit > 0)) {
+		printf("Succesfully parsed %d SV streams. Limited to %d \n",opt->sv_num,opt->sv_limit);
+		opt->sv_num =opt->sv_limit;
+	} else {
+		printf("Succesfully parsed %d SV streams \n",opt->sv_num);
 	}
+
+	printSvOpt(opt);	
 }
+
 
 
 
@@ -273,6 +286,12 @@ void usage(const char *prog)
 
 void parse_command_line(int argc, char **argv, struct sSvOpt *opt)
 {
+	opt->xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST;
+    opt->interval = 1;
+    opt->xdp_bind_flags = XDP_USE_NEED_WAKEUP | XDP_COPY;
+    opt->xsk_frame_size = XSK_UMEM__DEFAULT_FRAME_SIZE;
+    opt->need_wakeup = true;
+
 	for (;;) {
 		int c = getopt_long(argc, argv, "PSNi:c:l:dpn:zmf:u", long_options, NULL);
 		if (c == -1) {
@@ -292,7 +311,6 @@ void parse_command_line(int argc, char **argv, struct sSvOpt *opt)
 		case 'S':
 			opt->mode = 'S';
 			opt->xdp_flags |= XDP_FLAGS_SKB_MODE;
-			opt->xdp_bind_flags |= XDP_COPY;
 			break;
 		case 'N':
 			opt->mode = 'N';

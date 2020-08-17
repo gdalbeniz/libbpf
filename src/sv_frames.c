@@ -1,4 +1,6 @@
 #include "sv_injector.h"
+#include "sv_frames.h"
+#include "sv_config.h"
 
 
 
@@ -21,6 +23,38 @@ void getSvpBuffer(SVPublisher svp, void **buffer, uint32_t *bufLen)
     *bufLen = self->payloadStart + self->payloadLength;
 }
 
+void printSvpBuffer(int32_t sv, int32_t smp, uint8_t *b, uint32_t blen)
+{
+#if 0
+	debug("············ sv %d smp %d len %d ············\n", sv, smp, blen);
+	while (blen > 0) {
+		char line[128];
+		sprintf(line, "%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+				b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
+		if (blen >= 16) {
+			b += 16;
+			blen -=16;
+		} else {
+			line[3*blen] = '\0';
+			blen = 0;
+		}
+		debug("%s\n", line);
+	}
+#endif
+}
+
+
+int32_t sv_smppoint(double rms, double degrees, double fact, int32_t point)
+{
+	double radians = 2 * M_PI * degrees / 360.0 + 2 * M_PI * point / 80.0;
+	return (int32_t) (rms * sqrt(2) * sin(radians) * fact);
+}
+
+
+void sv_frame_smpcnt(uint8_t *frame, uint16_t smp)
+{
+	*(uint16_t*)(frame+39+frame[36]) = htons(smp);
+}
 
 int32_t sv_prepare(uint8_t *samples, struct sSvConf *conf, uint32_t sv)
 {
@@ -60,7 +94,6 @@ int32_t sv_prepare(uint8_t *samples, struct sSvConf *conf, uint32_t sv)
 	int32_t vol4 = SVPublisher_ASDU_addINT32(asdu);
 	int32_t vol4q = SVPublisher_ASDU_addQuality(asdu);
 
-	//SVPublisher_ASDU_setSmpCntWrap(asdu, SAMPLEWRAP);//?
 	SVPublisher_setupComplete(svp);
 
 	for (uint16_t smp = 0; smp < SAMPLEWRAP; smp++) {
@@ -70,38 +103,38 @@ int32_t sv_prepare(uint8_t *samples, struct sSvConf *conf, uint32_t sv)
 		// update currents
 		int32_t currentA = sv_smppoint(conf[sv].ia_mag, conf[sv].ia_ang, 1000, point);
  		SVPublisher_ASDU_setINT32(asdu, amp1, currentA);
-		SVPublisher_ASDU_setQuality(asdu, amp1q, reverse16(conf[sv].ia_q));
+		SVPublisher_ASDU_setQuality(asdu, amp1q, conf[sv].ia_q);
 		int32_t currentB = sv_smppoint(conf[sv].ib_mag, conf[sv].ib_ang, 1000, point);
  		SVPublisher_ASDU_setINT32(asdu, amp2, currentB);
-		SVPublisher_ASDU_setQuality(asdu, amp2q, reverse16(conf[sv].ib_q));
+		SVPublisher_ASDU_setQuality(asdu, amp2q, conf[sv].ib_q);
 		int32_t currentC = sv_smppoint(conf[sv].ic_mag, conf[sv].ic_ang, 1000, point);
 		SVPublisher_ASDU_setINT32(asdu, amp3, currentC);
-		SVPublisher_ASDU_setQuality(asdu, amp3q, reverse16(conf[sv].ic_q));
+		SVPublisher_ASDU_setQuality(asdu, amp3q, conf[sv].ic_q);
 		if (conf[sv].in_q & QUALITY_DERIVED) {
 			SVPublisher_ASDU_setINT32(asdu, amp4, currentA + currentB + currentC);
 		} else {
 			int32_t currentN = sv_smppoint(conf[sv].in_mag, conf[sv].in_ang, 1000, point);
 			SVPublisher_ASDU_setINT32(asdu, amp4, currentN);
 		}
-		SVPublisher_ASDU_setQuality(asdu, amp4q, reverse16(conf[sv].in_q));
+		SVPublisher_ASDU_setQuality(asdu, amp4q, conf[sv].in_q);
 
 		// update voltages
 		int32_t voltageA = sv_smppoint(conf[sv].va_mag, conf[sv].va_ang, 100, point);
  		SVPublisher_ASDU_setINT32(asdu, vol1, voltageA);
-		SVPublisher_ASDU_setQuality(asdu, vol1q, reverse16(conf[sv].va_q));
+		SVPublisher_ASDU_setQuality(asdu, vol1q, conf[sv].va_q);
 		int32_t voltageB = sv_smppoint(conf[sv].vb_mag, conf[sv].vb_ang, 100, point);
  		SVPublisher_ASDU_setINT32(asdu, vol2, voltageB);
-		SVPublisher_ASDU_setQuality(asdu, vol3q, reverse16(conf[sv].vb_q));
+		SVPublisher_ASDU_setQuality(asdu, vol3q, conf[sv].vb_q);
 		int32_t voltageC = sv_smppoint(conf[sv].vc_mag, conf[sv].vc_ang, 100, point);
 		SVPublisher_ASDU_setINT32(asdu, vol3, voltageC);
-		SVPublisher_ASDU_setQuality(asdu, vol3q, reverse16(conf[sv].vc_q));
+		SVPublisher_ASDU_setQuality(asdu, vol3q, conf[sv].vc_q);
 		if (conf[sv].vn_q & QUALITY_DERIVED) {
 			SVPublisher_ASDU_setINT32(asdu, vol4, voltageA + voltageB + voltageC);
 		} else {
 			int32_t voltageN = sv_smppoint(conf[sv].vn_mag, conf[sv].vn_ang, 100, point);
 			SVPublisher_ASDU_setINT32(asdu, vol4, voltageN);
 		}
-		SVPublisher_ASDU_setQuality(asdu, vol4q, reverse16(conf[sv].vn_q));
+		SVPublisher_ASDU_setQuality(asdu, vol4q, conf[sv].vn_q);
 
 		// copy packet
 		uint8_t *buffer;
@@ -111,6 +144,7 @@ int32_t sv_prepare(uint8_t *samples, struct sSvConf *conf, uint32_t sv)
 			printf("error: packet size (%d) too big\n", bufLen);
 			return -1;
 		}
+		printSvpBuffer(sv, smp, buffer, bufLen);
 		uint8_t *sample_ptr = samples + smp * sv_opt.sv_num * PACKETSIZE + sv * PACKETSIZE;// uint8_t sv_samples[SAMPLEWRAP][sv_num][PACKETSIZE]
 		memcpy(sample_ptr, buffer, bufLen);
 

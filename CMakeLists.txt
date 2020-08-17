@@ -36,6 +36,7 @@ set(libbpf_SRCS
    libbpf/netlink.c
    libbpf/nlattr.c
    libbpf/xsk.c
+   libbpf/libbpf_print.c
 )
 add_executable(xdpsock_sv
   ${libbpf_SRCS}

@@ -7,8 +7,7 @@ struct sSvConf;
 
 
 int32_t sv_prepare(uint8_t *samples, struct sSvConf *conf, uint32_t sv);
-
-
+void sv_frame_smpcnt(uint8_t *frame, uint16_t smp);
 
 
 

@@ -47,11 +47,10 @@ struct sSvConf {
 };
 
 struct sSvOpt {
-    int test;
     uint32_t xdp_flags;// = XDP_FLAGS_UPDATE_IF_NOEXIST;
-    const char *iface;// = null;
+    const char *iface;
     int ifindex;
-    char mode;// = 'P';
+    char mode;
     int poll;
     int interval;// = 1;
     uint32_t xdp_bind_flags;// = XDP_USE_NEED_WAKEUP;
@@ -59,10 +58,9 @@ struct sSvOpt {
     int unaligned_chunks;
     int mmap_flags;
     int xsk_frame_size;// = XSK_UMEM__DEFAULT_FRAME_SIZE;
-    int timeout;// = 1000;
     bool need_wakeup;// = true;
-    bool debug;// = true;
-    const char *cfg_file;// = null;
+    bool debug;
+    const char *cfg_file;
     uint32_t sv_limit;
 
     struct sSvConf def_conf;

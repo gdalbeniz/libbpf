@@ -74,31 +74,28 @@ extern int opt_xsk_frame_size;
 extern int opt_timeout;
 extern bool opt_need_wakeup;
 
-uint32_t prog_id;
 
-struct xsk_umem_info {
+
+struct sv_xdp_socket_info {
+	struct xsk_ring_cons rx;
+	struct xsk_ring_prod tx;
 	struct xsk_ring_prod fq;
 	struct xsk_ring_cons cq;
 	struct xsk_umem *umem;
-	void *buffer;
-};
-
-struct xsk_socket_info {
-	struct xsk_ring_cons rx;
-	struct xsk_ring_prod tx;
-	struct xsk_umem_info *umem;
+	char *umem_area;
 	struct xsk_socket *xsk;
 	unsigned long rx_npkts;
 	unsigned long tx_npkts;
 	unsigned long prev_rx_npkts;
 	unsigned long prev_tx_npkts;
 	uint32_t outstanding_tx;
+	uint32_t prog_id;
 };
+struct sv_xdp_socket_info *xsksi;
 
-static int num_socks;
-struct xsk_socket_info *xsks[MAX_SOCKS];
 
-static unsigned long get_nsecs(void)
+
+unsigned long get_nsecs(void)
 {
 	struct timespec ts;
 
@@ -134,28 +131,25 @@ void dump_stats(void)
 	int i;
 
 	prev_time = now;
+	
+	char *fmt = "%-15s %'-11.0f %'-11lu\n";
+	double rx_pps, tx_pps;
 
-	for (i = 0; i < num_socks && xsks[i]; i++) {
-		char *fmt = "%-15s %'-11.0f %'-11lu\n";
-		double rx_pps, tx_pps;
+	rx_pps = (xsksi->rx_npkts - xsksi->prev_rx_npkts) *
+			1000000000. / dt;
+	tx_pps = (xsksi->tx_npkts - xsksi->prev_tx_npkts) *
+			1000000000. / dt;
 
-		rx_pps = (xsks[i]->rx_npkts - xsks[i]->prev_rx_npkts) *
-			 1000000000. / dt;
-		tx_pps = (xsks[i]->tx_npkts - xsks[i]->prev_tx_npkts) *
-			 1000000000. / dt;
+	printf("\n sock%d@", i);
+	print_benchmark(false);
+	printf("\n");
 
-		printf("\n sock%d@", i);
-		print_benchmark(false);
-		printf("\n");
+	printf("%-15s %-11s %-11s %-11.2f\n", "", "pps", "pkts", dt / 1000000000.);
+	printf(fmt, "rx", rx_pps, xsksi->rx_npkts);
+	printf(fmt, "tx", tx_pps, xsksi->tx_npkts);
 
-		printf("%-15s %-11s %-11s %-11.2f\n", "", "pps", "pkts",
-		       dt / 1000000000.);
-		printf(fmt, "rx", rx_pps, xsks[i]->rx_npkts);
-		printf(fmt, "tx", tx_pps, xsks[i]->tx_npkts);
-
-		xsks[i]->prev_rx_npkts = xsks[i]->rx_npkts;
-		xsks[i]->prev_tx_npkts = xsks[i]->tx_npkts;
-	}
+	xsksi->prev_rx_npkts = xsksi->rx_npkts;
+	xsksi->prev_tx_npkts = xsksi->tx_npkts;
 }
 
 void __exit_with_error(int error, const char *file, const char *func, int line)
@@ -170,7 +164,7 @@ void __exit_with_error(int error, const char *file, const char *func, int line)
 #define exit_with_error(error) __exit_with_error(error, __FILE__, __func__, __LINE__)
 
 
-static void remove_xdp_program(void)
+static void remove_xdp_program(uint32_t prog_id)
 {
 	uint32_t curr_prog_id = 0;
 
@@ -187,203 +181,187 @@ static void remove_xdp_program(void)
 }
 
 
-static size_t gen_eth_frame(struct xsk_umem_info *umem, uint64_t addr, uint32_t svid, uint32_t smp)
+static void gen_eth_frame(struct sv_xdp_socket_info *xski, uint64_t addr, uint32_t svid, uint32_t smp)
 {
-	void *pkt_ptr = xsk_umem__get_data(umem->buffer, addr);
+	uint8_t *pkt_ptr = xsk_umem__get_data(xski->umem_area, addr);
 	memcpy(pkt_ptr, pkt_frames[smp % FRAME_NUM], FRAME_SIZE);
-	*(uint16_t*)(pkt_ptr+SMPC_OFFSET) = htons((uint16_t)smp);
-	return 0;
+	*(uint16_t*)(pkt_ptr+39+pkt_ptr[36]) = htons((uint16_t)smp);
+#if 0
+	printf("············ sv %d smp %d len %d ············\n", svid, smp, FRAME_SIZE);
+	uint8_t blen = FRAME_SIZE;
+	uint8_t *b = pkt_ptr;
+	while (blen > 0) {
+		char line[128];
+		sprintf(line, "%02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x %02x",
+				b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9], b[10], b[11], b[12], b[13], b[14], b[15]);
+		if (blen >= 16) {
+			b += 16;
+			blen -=16;
+		} else {
+			line[3*blen] = '\0';
+			blen = 0;
+		}
+		printf("%s\n", line);
+	}
+#endif
 }
 
-static struct xsk_umem_info *xsk_configure_umem(void *buffer, uint64_t size)
+static struct sv_xdp_socket_info *sv_xdp_configure_socket(uint32_t num_frames, uint32_t frame_size)
 {
-	struct xsk_umem_info *umem;
-	struct xsk_umem_config cfg = {
+	int ret;
+
+	struct sv_xdp_socket_info *xski = calloc(1, sizeof(struct sv_xdp_socket_info));
+	if (!xski) {
+		exit_with_error(errno);
+	}
+
+	// reserve memory for the umem. Use hugepages if unaligned chunk mode
+	xski->umem_area = mmap(NULL, num_frames * frame_size, PROT_READ | PROT_WRITE,
+						MAP_PRIVATE | MAP_ANONYMOUS | opt_mmap_flags, -1, 0);
+	if (xski->umem_area == MAP_FAILED) {
+		printf("ERROR: mmap failed\n");
+		exit(EXIT_FAILURE);
+	}
+
+	// configure umem
+	struct xsk_umem_config ucfg = {
 		.fill_size = XSK_RING_PROD__DEFAULT_NUM_DESCS,
 		.comp_size = XSK_RING_CONS__DEFAULT_NUM_DESCS,
 		.frame_size = opt_xsk_frame_size,
 		.frame_headroom = XSK_UMEM__DEFAULT_FRAME_HEADROOM,
 		.flags = opt_umem_flags
 	};
-
-	int ret;
-
-	umem = calloc(1, sizeof(*umem));
-	if (!umem)
-		exit_with_error(errno);
-
-	ret = xsk_umem__create(&umem->umem, buffer, size, &umem->fq, &umem->cq, &cfg);
-
-	if (ret)
+	ret = xsk_umem__create(&xski->umem, xski->umem_area, num_frames * frame_size, &xski->fq, &xski->cq, &ucfg);
+	if (ret) {
 		exit_with_error(-ret);
+	}
 
-	umem->buffer = buffer;
-	return umem;
-}
+	// configure socket
+	struct xsk_socket_config scfg = {
+		.rx_size = XSK_RING_CONS__DEFAULT_NUM_DESCS,
+		.tx_size = XSK_RING_PROD__DEFAULT_NUM_DESCS,
+		.libbpf_flags = 0,
+		.xdp_flags = opt_xdp_flags,
+		.bind_flags = opt_xdp_bind_flags
+	};	
+	ret = xsk_socket__create(&xski->xsk, opt_if, opt_queue, xski->umem, &xski->rx, &xski->tx, &scfg);
+	if (ret) {
+		exit_with_error(-ret);
+	}
 
-static struct xsk_socket_info *xsk_configure_socket(struct xsk_umem_info *umem)
-{
-	struct xsk_socket_config cfg;
-	struct xsk_socket_info *xsk;
-	int ret;
+	ret = bpf_get_link_xdp_id(opt_ifindex, &xski->prog_id, opt_xdp_flags); //needed?
+	if (ret) {
+		exit_with_error(-ret);
+	}
+
 	uint32_t idx;
-	int i;
-
-	xsk = calloc(1, sizeof(*xsk));
-	if (!xsk)
-		exit_with_error(errno);
-
-	xsk->umem = umem;
-	cfg.rx_size = XSK_RING_CONS__DEFAULT_NUM_DESCS;
-	cfg.tx_size = XSK_RING_PROD__DEFAULT_NUM_DESCS;
-	cfg.libbpf_flags = 0;
-	cfg.xdp_flags = opt_xdp_flags;
-	cfg.bind_flags = opt_xdp_bind_flags;
-	ret = xsk_socket__create(&xsk->xsk, opt_if, opt_queue, umem->umem,
-				 &xsk->rx, &xsk->tx, &cfg);
-	if (ret)
+	ret = xsk_ring_prod__reserve(&xski->fq, XSK_RING_PROD__DEFAULT_NUM_DESCS, &idx);
+	if (ret != XSK_RING_PROD__DEFAULT_NUM_DESCS) {
 		exit_with_error(-ret);
+	}
+	for (int i = 0; i < XSK_RING_PROD__DEFAULT_NUM_DESCS; i++) {
+		*xsk_ring_prod__fill_addr(&xski->fq, idx+i) = i * opt_xsk_frame_size;
+	}
+	xsk_ring_prod__submit(&xski->fq, XSK_RING_PROD__DEFAULT_NUM_DESCS);
 
-	ret = bpf_get_link_xdp_id(opt_ifindex, &prog_id, opt_xdp_flags);
-	if (ret)
-		exit_with_error(-ret);
-
-	ret = xsk_ring_prod__reserve(&xsk->umem->fq,
-				     XSK_RING_PROD__DEFAULT_NUM_DESCS,
-				     &idx);
-	if (ret != XSK_RING_PROD__DEFAULT_NUM_DESCS)
-		exit_with_error(-ret);
-	for (i = 0; i < XSK_RING_PROD__DEFAULT_NUM_DESCS; i++)
-		*xsk_ring_prod__fill_addr(&xsk->umem->fq, idx++) =
-			i * opt_xsk_frame_size;
-	xsk_ring_prod__submit(&xsk->umem->fq,
-			      XSK_RING_PROD__DEFAULT_NUM_DESCS);
-
-	return xsk;
+	return xski;
 }
 
 
-static void kick_tx(struct xsk_socket_info *xsk)
+static void kick_tx(struct sv_xdp_socket_info *xsk)
 {
-	int ret;
-
-	ret = sendto(xsk_socket__fd(xsk->xsk), NULL, 0, MSG_DONTWAIT, NULL, 0);
-	if (ret >= 0 || errno == ENOBUFS || errno == EAGAIN || errno == EBUSY)
+	errno = 0;
+	int ret = sendto(xsk_socket__fd(xsk->xsk), NULL, 0, MSG_DONTWAIT, NULL, 0);
+	if (ret >= 0 || errno == ENOBUFS || errno == EAGAIN || errno == EBUSY) {
 		return;
+	}
 	exit_with_error(errno);
 }
 
 
-static inline void complete_tx_only(struct xsk_socket_info *xsk)
+static inline void complete_tx_only(struct sv_xdp_socket_info *xski)
 {
 	unsigned int rcvd;
 	uint32_t idx;
 
-	if (!xsk->outstanding_tx)
+	if (!xski->outstanding_tx) {
 		return;
+	}
 
-	if (!opt_need_wakeup || xsk_ring_prod__needs_wakeup(&xsk->tx))
-		kick_tx(xsk);
+	if (!opt_need_wakeup || xsk_ring_prod__needs_wakeup(&xski->tx)) {
+		kick_tx(xski);
+	}
 
-	rcvd = xsk_ring_cons__peek(&xsk->umem->cq, BATCH_SIZE, &idx);
+	rcvd = xsk_ring_cons__peek(&xski->cq, BATCH_SIZE, &idx);
 	if (rcvd > 0) {
-		xsk_ring_cons__release(&xsk->umem->cq, rcvd);
-		xsk->outstanding_tx -= rcvd;
-		xsk->tx_npkts += rcvd;
+		xsk_ring_cons__release(&xski->cq, rcvd);
+		xski->outstanding_tx -= rcvd;
+		xski->tx_npkts += rcvd;
 	}
 }
 
-static void tx_only(struct xsk_socket_info *xsk, uint32_t frame_nb)
+static void tx_only(struct sv_xdp_socket_info *xski, uint32_t frame_nb)
 {
 	uint32_t idx;
 
-	if (xsk_ring_prod__reserve(&xsk->tx, BATCH_SIZE, &idx) == BATCH_SIZE) {
+	if (xsk_ring_prod__reserve(&xski->tx, BATCH_SIZE, &idx) == BATCH_SIZE) {
 		unsigned int i;
 
 		for (i = 0; i < BATCH_SIZE; i++) {
-			xsk_ring_prod__tx_desc(&xsk->tx, idx + i)->addr	= (frame_nb + i) << XSK_UMEM__DEFAULT_FRAME_SHIFT;
-			xsk_ring_prod__tx_desc(&xsk->tx, idx + i)->len = FRAME_SIZE;
+			xsk_ring_prod__tx_desc(&xski->tx, idx + i)->addr	= (frame_nb + i) << XSK_UMEM__DEFAULT_FRAME_SHIFT;
+			xsk_ring_prod__tx_desc(&xski->tx, idx + i)->len = FRAME_SIZE;
 		}
 
-		xsk_ring_prod__submit(&xsk->tx, BATCH_SIZE);
-		xsk->outstanding_tx += BATCH_SIZE;
+		xsk_ring_prod__submit(&xski->tx, BATCH_SIZE);
+		xski->outstanding_tx += BATCH_SIZE;
 		frame_nb += BATCH_SIZE;
 		frame_nb %= NUM_FRAMES;
 	}
 
-	complete_tx_only(xsk);
+	complete_tx_only(xski);
 }
 
-static void tx_only_all(void)
-{
-	struct pollfd fds[MAX_SOCKS];
-	uint32_t frame_nb[MAX_SOCKS] = {};
-	int i, ret;
 
-	memset(fds, 0, sizeof(fds));
-	for (i = 0; i < num_socks; i++) {
-		fds[0].fd = xsk_socket__fd(xsks[i]->xsk);
-		fds[0].events = POLLOUT;
-	}
-
-	for (;;) {
-		if (opt_poll) {
-			ret = poll(fds, num_socks, opt_timeout);
-			if (ret <= 0)
-				continue;
-
-			if (!(fds[0].revents & POLLOUT))
-				continue;
-		}
-
-		for (i = 0; i < num_socks; i++)
-			tx_only(xsks[i], frame_nb[i]);
-	}
-}
-
-void cleanup_xdp(void)
-{
-    struct xsk_umem *umem = xsks[0]->umem->umem;
-	xsk_socket__delete(xsks[0]->xsk);
-	(void)xsk_umem__delete(umem);
-	remove_xdp_program();
-}
 
 void start_xdp(void)
 {
-	struct xsk_umem_info *umem;
-	void *bufs;
+	/* Create mmap, umem and sockets */
 
-	/* Reserve memory for the umem. Use hugepages if unaligned chunk mode */
-	bufs = mmap(NULL, NUM_FRAMES * opt_xsk_frame_size,
-		    PROT_READ | PROT_WRITE,
-		    MAP_PRIVATE | MAP_ANONYMOUS | opt_mmap_flags, -1, 0);
-	if (bufs == MAP_FAILED) {
-		printf("ERROR: mmap failed\n");
-		exit(EXIT_FAILURE);
+	xsksi = sv_xdp_configure_socket(NUM_FRAMES, opt_xsk_frame_size);
+
+	for (int i = 0; i < NUM_FRAMES; i++) {
+		gen_eth_frame(xsksi, i * opt_xsk_frame_size, 0, i);
 	}
-       /* Create sockets... */
-	umem = xsk_configure_umem(bufs, NUM_FRAMES * opt_xsk_frame_size);
-	xsks[num_socks++] = xsk_configure_socket(umem);
 
-	{
-		int i;
+	struct pollfd fds;
+	uint32_t frame_nb = 0;
+	int i, ret;
 
-		for (i = 0; i < NUM_FRAMES; i++) {
-			(void) gen_eth_frame(umem, i * opt_xsk_frame_size, 0, i);
+	memset(&fds, 0, sizeof(fds));
+	fds.fd = xsk_socket__fd(xsksi->xsk);
+	fds.events = POLLOUT;
+
+	for (;;) {
+		if (opt_poll) {
+			ret = poll(&fds, 1, 1000);
+			if (ret <= 0)
+				continue;
+
+			if (!(fds.revents & POLLOUT))
+				continue;
 		}
-	}
-    
-	prev_time = get_nsecs();
 
-	tx_only_all();
+		sleep(1);
+		tx_only(xsksi, frame_nb);
+	}
 }
 
-/* this function is needed to not include libbpf.c tha needs a bunch of other dependencies too */
-void libbpf_print(enum libbpf_print_level level, const char *format, ...)
+
+
+void cleanup_xdp(void)
 {
-	va_list args;
-	va_start(args, format);
-	vfprintf(stderr, format, args);
-	va_end(args);
+    struct xsk_umem *umem = xsksi->umem;
+	xsk_socket__delete(xsksi->xsk);
+	(void)xsk_umem__delete(umem);
+	remove_xdp_program(xsksi->prog_id);
 }
