@@ -59,6 +59,7 @@ target_link_libraries(sv_injector
   PRIVATE m
   PRIVATE ${IEC61850_LIBRARY}
   PRIVATE ${IEC61850HAL_LIBRARY}
+  PRIVATE Threads::Threads
 )
 
 

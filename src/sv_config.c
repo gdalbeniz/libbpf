@@ -78,7 +78,7 @@ static int ini_parse_handler(void* user, const char* section, const char* key, c
 		debug("--- new section (%d) = %s\n", opt->sv_num, section);
 		if (opt->sv_num >= opt->sv_alloc) {
 			// allocate more space
-			opt->sv_alloc += SV_ALLOC_SZ;
+			opt->sv_alloc += 64;
 			opt->sv_conf = realloc(opt->sv_conf, opt->sv_alloc * sizeof(struct sSvConf));
 			debug("--- allocate total = %d\n", opt->sv_alloc);
 		}
@@ -222,8 +222,8 @@ void parse_cfg_file(struct sSvOpt *opt)
 		exit(EXIT_FAILURE);
 	}
 	
-	if (opt->sv_num > SV_MAX) {
-		printf("error: too many sv (%d > %d)\n",opt->sv_num, SV_MAX);
+	if (opt->sv_num > MAX_STREAMS) {
+		printf("error: too many sv (%d > %d)\n",opt->sv_num, MAX_STREAMS);
 		exit(EXIT_FAILURE);
 	} else if ((opt->sv_num >opt->sv_limit) && (opt->sv_limit > 0)) {
 		printf("Succesfully parsed %d SV streams. Limited to %d \n",opt->sv_num,opt->sv_limit);
@@ -250,6 +250,7 @@ struct option long_options[] = {
 	{"config", required_argument, 0, 'c'},
 	{"limit", required_argument, 0, 'l'},
 	{"debug", no_argument, 0, 'd'},
+	{"rt-prio", required_argument, 0, 'r'},
 
 	{"poll", no_argument, 0, 'p'},
 	{"interval", required_argument, 0, 'n'},
@@ -272,6 +273,7 @@ void usage(const char *prog)
 		"  -c, --config=s       Configuration file='s'.\n"
 		"  -l, --limit=n        Limit number of streams to n\n"
 		"  -d, --debug          Debug\n"
+		"  -r, --rt-prio=n      Set RT priority to n\n"
 
 		"  -p, --poll           Use poll syscall\n"
 		"  -n, --interval=n     Specify statistics update interval (default 1 sec).\n"
@@ -293,7 +295,7 @@ void parse_command_line(int argc, char **argv, struct sSvOpt *opt)
     opt->need_wakeup = true;
 
 	for (;;) {
-		int c = getopt_long(argc, argv, "PSNi:c:l:dpn:zmf:u", long_options, NULL);
+		int c = getopt_long(argc, argv, "PSNi:c:l:dr:pn:zmf:u", long_options, NULL);
 		if (c == -1) {
 			break;
 		}
@@ -324,6 +326,9 @@ void parse_command_line(int argc, char **argv, struct sSvOpt *opt)
 			break;
 		case 'l':
 			opt->sv_limit = atoi(optarg);
+			break;
+		case 'r':
+			opt->rt_prio = atoi(optarg);
 			break;
 		case 'z':
 			opt->xdp_bind_flags |= XDP_ZEROCOPY;
@@ -357,8 +362,7 @@ void parse_command_line(int argc, char **argv, struct sSvOpt *opt)
 		usage(basename(argv[0]));
 	}
 
-	if ((opt->xsk_frame_size & (opt->xsk_frame_size - 1)) &&
-	    !opt->unaligned_chunks) {
+	if ((opt->xsk_frame_size & (opt->xsk_frame_size - 1)) && !opt->unaligned_chunks) {
 		fprintf(stderr, "--frame-size=%d is not a power of two\n",
 			opt->xsk_frame_size);
 		usage(basename(argv[0]));

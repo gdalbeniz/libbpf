@@ -32,6 +32,7 @@
 #include <sys/mman.h>
 #include <sys/resource.h>
 #include <arpa/inet.h>
+#include <sched.h>
 
 #include "sv_publisher.h"
 #include "hal_ethernet.h"
@@ -42,5 +43,7 @@
 
 
 void debug(const char *fmt, ...);
+//void __exit_with_error(int error, const char *file, const char *func, int line);
+//#define exit_with_error(error) __exit_with_error(error, __FILE__, __func__, __LINE__)
 
 #endif

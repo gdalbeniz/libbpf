@@ -53,7 +53,7 @@ uint32_t opt_umem_flags;
 int opt_unaligned_chunks;
 int opt_mmap_flags;
 uint32_t opt_xdp_bind_flags;
-int opt_xsk_frame_size = XSK_UMEM__DEFAULT_FRAME_SIZE;
+int opt_xsk_frame_size = XSK_UMEM__DEFAULT_FRAME_SIZE/2;
 int opt_timeout = 1000;
 bool opt_need_wakeup = true;
 int opt_debug = 1;
@@ -204,7 +204,12 @@ int main(int argc, char **argv)
 
 	parse_command_line(argc, argv);
 
-
+	// set up process and stats thread
+	struct rlimit r = {RLIM_INFINITY, RLIM_INFINITY};
+	if (setrlimit(RLIMIT_MEMLOCK, &r)) {
+		fprintf(stderr, "ERROR: setrlimit(RLIMIT_MEMLOCK) \"%s\"\n", strerror(errno));
+		exit(EXIT_FAILURE);
+	}
 	
 
 	signal(SIGINT, int_exit);

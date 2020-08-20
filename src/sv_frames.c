@@ -1,31 +1,33 @@
 #include "sv_injector.h"
 #include "sv_frames.h"
 #include "sv_config.h"
+#include "sv_packet.h"
 
 
 
 
-
-void getSvpBuffer(SVPublisher svp, void **buffer, uint32_t *bufLen)
+int32_t copySvpBuffer(SVPublisher svp, uint8_t *dest)
 {
 	struct fSVPublisher {
 		uint8_t* buffer;
 		uint16_t appId;
 		void* ethernetSocket;
-		int lengthField; /* can probably be removed since packets have fixed size! */
+		int lengthField;
 		int payloadStart;
-		int payloadLength; /* length of payload buffer */
-		int asduCount; /* number of ASDUs in the APDU */
+		int payloadLength;
+		int asduCount;
 		void* asduList;
 	};
 	struct fSVPublisher *self = (struct fSVPublisher *) svp;
-    *buffer = self->buffer;
-    *bufLen = self->payloadStart + self->payloadLength;
+
+	int32_t bufLen = self->payloadStart + self->payloadLength;
+	memcpy(dest, self->buffer, bufLen);
+
+	return bufLen;
 }
 
 void printSvpBuffer(int32_t sv, int32_t smp, uint8_t *b, uint32_t blen)
 {
-#if 0
 	debug("············ sv %d smp %d len %d ············\n", sv, smp, blen);
 	while (blen > 0) {
 		char line[128];
@@ -40,7 +42,6 @@ void printSvpBuffer(int32_t sv, int32_t smp, uint8_t *b, uint32_t blen)
 		}
 		debug("%s\n", line);
 	}
-#endif
 }
 
 
@@ -137,38 +138,37 @@ int32_t sv_prepare(uint8_t *samples, struct sSvConf *conf, uint32_t sv)
 		SVPublisher_ASDU_setQuality(asdu, vol4q, conf[sv].vn_q);
 
 		// copy packet
-		uint8_t *buffer;
-		uint32_t bufLen;
-		getSvpBuffer(svp, &buffer, &bufLen);
+		uint8_t *sample_ptr = samples + smp * sv_opt.sv_num * PACKETSIZE + sv * PACKETSIZE;// uint8_t sv_samples[SAMPLEWRAP][sv_num][PACKETSIZE]
+		int32_t bufLen = copySvpBuffer(svp, sample_ptr);
 		if (bufLen > PACKETSIZE) {
 			printf("error: packet size (%d) too big\n", bufLen);
 			return -1;
 		}
+#if 0
 		printSvpBuffer(sv, smp, buffer, bufLen);
-		uint8_t *sample_ptr = samples + smp * sv_opt.sv_num * PACKETSIZE + sv * PACKETSIZE;// uint8_t sv_samples[SAMPLEWRAP][sv_num][PACKETSIZE]
-		memcpy(sample_ptr, buffer, bufLen);
+#endif
 
 		// prepare sendmmsg info
-		sv_socket.samp[smp].address[sv].sll_family = AF_PACKET;
-		sv_socket.samp[smp].address[sv].sll_protocol = htons(0x88ba);
-		sv_socket.samp[smp].address[sv].sll_ifindex = sv_opt.ifindex;
-		sv_socket.samp[smp].address[sv].sll_halen = ETH_ALEN;
-		sv_socket.samp[smp].address[sv].sll_addr[0] = conf[sv].mac[0];
-		sv_socket.samp[smp].address[sv].sll_addr[1] = conf[sv].mac[1];
-		sv_socket.samp[smp].address[sv].sll_addr[2] = conf[sv].mac[2];
-		sv_socket.samp[smp].address[sv].sll_addr[3] = conf[sv].mac[3];
-		sv_socket.samp[smp].address[sv].sll_addr[4] = conf[sv].mac[4];
-		sv_socket.samp[smp].address[sv].sll_addr[5] = conf[sv].mac[5];
-		sv_socket.samp[smp].address[sv].sll_hatype = 0; // not needed
-		sv_socket.samp[smp].address[sv].sll_pkttype = 0; // not needed
-		sv_socket.samp[smp].msgvec[sv].msg_hdr.msg_name = &sv_socket.samp[smp].address[sv];
-		sv_socket.samp[smp].msgvec[sv].msg_hdr.msg_namelen = sizeof(struct sockaddr_ll);
-		sv_socket.samp[smp].msgvec[sv].msg_hdr.msg_iov = &sv_socket.samp[smp].iov[sv];
-		sv_socket.samp[smp].msgvec[sv].msg_hdr.msg_iovlen = 1;
-		sv_socket.samp[smp].msgvec[sv].msg_hdr.msg_control = NULL;
-		sv_socket.samp[smp].msgvec[sv].msg_hdr.msg_controllen = 0;
-		sv_socket.samp[smp].iov[sv].iov_base = sample_ptr;
-		sv_socket.samp[smp].iov[sv].iov_len = bufLen;
+		sv_pkt_skt.aux[smp].address[sv].sll_family = AF_PACKET;
+		sv_pkt_skt.aux[smp].address[sv].sll_protocol = htons(0x88ba);
+		sv_pkt_skt.aux[smp].address[sv].sll_ifindex = sv_opt.ifindex;
+		sv_pkt_skt.aux[smp].address[sv].sll_halen = ETH_ALEN;
+		sv_pkt_skt.aux[smp].address[sv].sll_addr[0] = conf[sv].mac[0];
+		sv_pkt_skt.aux[smp].address[sv].sll_addr[1] = conf[sv].mac[1];
+		sv_pkt_skt.aux[smp].address[sv].sll_addr[2] = conf[sv].mac[2];
+		sv_pkt_skt.aux[smp].address[sv].sll_addr[3] = conf[sv].mac[3];
+		sv_pkt_skt.aux[smp].address[sv].sll_addr[4] = conf[sv].mac[4];
+		sv_pkt_skt.aux[smp].address[sv].sll_addr[5] = conf[sv].mac[5];
+		sv_pkt_skt.aux[smp].address[sv].sll_hatype = 0; // not needed
+		sv_pkt_skt.aux[smp].address[sv].sll_pkttype = 0; // not needed
+		sv_pkt_skt.aux[smp].msgvec[sv].msg_hdr.msg_name = &sv_pkt_skt.aux[smp].address[sv];
+		sv_pkt_skt.aux[smp].msgvec[sv].msg_hdr.msg_namelen = sizeof(struct sockaddr_ll);
+		sv_pkt_skt.aux[smp].msgvec[sv].msg_hdr.msg_iov = &sv_pkt_skt.aux[smp].iov[sv];
+		sv_pkt_skt.aux[smp].msgvec[sv].msg_hdr.msg_iovlen = 1;
+		sv_pkt_skt.aux[smp].msgvec[sv].msg_hdr.msg_control = NULL;
+		sv_pkt_skt.aux[smp].msgvec[sv].msg_hdr.msg_controllen = 0;
+		sv_pkt_skt.aux[smp].iov[sv].iov_base = sample_ptr;
+		sv_pkt_skt.aux[smp].iov[sv].iov_len = bufLen;
 	}
 
 	SVPublisher_destroy(svp);

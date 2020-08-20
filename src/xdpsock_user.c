@@ -48,8 +48,12 @@
 // #define PF_XDP AF_XDP
 // #endif
 
-#define NUM_FRAMES (4000)
-#define BATCH_SIZE 128
+
+#define SAMPLEWRAP (4000)
+#define PACKET_SIZE (256)
+#define MAX_STREAMS (256)
+#define NUM_FRAMES (SAMPLEWRAP*PACKET_SIZE*MAX_STREAMS/XSK_UMEM__DEFAULT_FRAME_SIZE)
+#define BATCH_SIZE 100
 
 #define DEBUG_HEXDUMP 0
 #define MAX_SOCKS 8
@@ -227,7 +231,7 @@ static struct sv_xdp_socket_info *sv_xdp_configure_socket(uint32_t num_frames, u
 	struct xsk_umem_config ucfg = {
 		.fill_size = XSK_RING_PROD__DEFAULT_NUM_DESCS,
 		.comp_size = XSK_RING_CONS__DEFAULT_NUM_DESCS,
-		.frame_size = opt_xsk_frame_size,
+		.frame_size = frame_size,
 		.frame_headroom = XSK_UMEM__DEFAULT_FRAME_HEADROOM,
 		.flags = opt_umem_flags
 	};
@@ -249,76 +253,68 @@ static struct sv_xdp_socket_info *sv_xdp_configure_socket(uint32_t num_frames, u
 		exit_with_error(-ret);
 	}
 
-	ret = bpf_get_link_xdp_id(opt_ifindex, &xski->prog_id, opt_xdp_flags); //needed?
-	if (ret) {
-		exit_with_error(-ret);
-	}
+	// ret = bpf_get_link_xdp_id(opt_ifindex, &xski->prog_id, opt_xdp_flags); //needed?
+	// if (ret) {
+	// 	exit_with_error(-ret);
+	// }
 
-	uint32_t idx;
-	ret = xsk_ring_prod__reserve(&xski->fq, XSK_RING_PROD__DEFAULT_NUM_DESCS, &idx);
-	if (ret != XSK_RING_PROD__DEFAULT_NUM_DESCS) {
-		exit_with_error(-ret);
-	}
-	for (int i = 0; i < XSK_RING_PROD__DEFAULT_NUM_DESCS; i++) {
-		*xsk_ring_prod__fill_addr(&xski->fq, idx+i) = i * opt_xsk_frame_size;
-	}
-	xsk_ring_prod__submit(&xski->fq, XSK_RING_PROD__DEFAULT_NUM_DESCS);
+	// uint32_t idx;
+	// ret = xsk_ring_prod__reserve(&xski->fq, XSK_RING_PROD__DEFAULT_NUM_DESCS, &idx);
+	// if (ret != XSK_RING_PROD__DEFAULT_NUM_DESCS) {
+	// 	exit_with_error(-ret);
+	// }
+	// for (int i = 0; i < XSK_RING_PROD__DEFAULT_NUM_DESCS; i++) {
+	// 	*xsk_ring_prod__fill_addr(&xski->fq, idx+i) = i * opt_xsk_frame_size;
+	// }
+	// xsk_ring_prod__submit(&xski->fq, XSK_RING_PROD__DEFAULT_NUM_DESCS);
 
 	return xski;
 }
 
 
-static void kick_tx(struct sv_xdp_socket_info *xsk)
-{
-	errno = 0;
-	int ret = sendto(xsk_socket__fd(xsk->xsk), NULL, 0, MSG_DONTWAIT, NULL, 0);
-	if (ret >= 0 || errno == ENOBUFS || errno == EAGAIN || errno == EBUSY) {
-		return;
-	}
-	exit_with_error(errno);
-}
 
 
-static inline void complete_tx_only(struct sv_xdp_socket_info *xski)
+static void tx_only(struct sv_xdp_socket_info *xski, uint32_t *frame_nb)
 {
-	unsigned int rcvd;
 	uint32_t idx;
+
+	int32_t ret = xsk_ring_prod__reserve(&xski->tx, BATCH_SIZE, &idx);
+	if (ret  == BATCH_SIZE) {
+		unsigned int i;
+
+		for (i = 0; i < BATCH_SIZE; i++) {
+			xsk_ring_prod__tx_desc(&xski->tx, idx + i)->addr = (*frame_nb + i) * opt_xsk_frame_size;
+			xsk_ring_prod__tx_desc(&xski->tx, idx + i)->len = FRAME_SIZE;
+		}
+
+		xsk_ring_prod__submit(&xski->tx, BATCH_SIZE);
+		xski->outstanding_tx += BATCH_SIZE;
+		*frame_nb += BATCH_SIZE;
+		*frame_nb %= NUM_FRAMES;
+	} else {
+		//printf("xsk_ring_prod__reserve ret %d\n", ret);
+	}
+
 
 	if (!xski->outstanding_tx) {
 		return;
 	}
 
 	if (!opt_need_wakeup || xsk_ring_prod__needs_wakeup(&xski->tx)) {
-		kick_tx(xski);
+		//kick tx
+		errno = 0;
+		int ret = sendto(xsk_socket__fd(xski->xsk), NULL, 0, MSG_DONTWAIT, NULL, 0);
+		if (ret < 0 && errno != ENOBUFS && errno != EAGAIN && errno != EBUSY) {
+			exit_with_error(errno);
+		}
 	}
 
-	rcvd = xsk_ring_cons__peek(&xski->cq, BATCH_SIZE, &idx);
+	uint32_t rcvd = xsk_ring_cons__peek(&xski->cq, BATCH_SIZE, &idx);
 	if (rcvd > 0) {
 		xsk_ring_cons__release(&xski->cq, rcvd);
 		xski->outstanding_tx -= rcvd;
 		xski->tx_npkts += rcvd;
 	}
-}
-
-static void tx_only(struct sv_xdp_socket_info *xski, uint32_t frame_nb)
-{
-	uint32_t idx;
-
-	if (xsk_ring_prod__reserve(&xski->tx, BATCH_SIZE, &idx) == BATCH_SIZE) {
-		unsigned int i;
-
-		for (i = 0; i < BATCH_SIZE; i++) {
-			xsk_ring_prod__tx_desc(&xski->tx, idx + i)->addr	= (frame_nb + i) << XSK_UMEM__DEFAULT_FRAME_SHIFT;
-			xsk_ring_prod__tx_desc(&xski->tx, idx + i)->len = FRAME_SIZE;
-		}
-
-		xsk_ring_prod__submit(&xski->tx, BATCH_SIZE);
-		xski->outstanding_tx += BATCH_SIZE;
-		frame_nb += BATCH_SIZE;
-		frame_nb %= NUM_FRAMES;
-	}
-
-	complete_tx_only(xski);
 }
 
 
@@ -351,8 +347,8 @@ void start_xdp(void)
 				continue;
 		}
 
-		sleep(1);
-		tx_only(xsksi, frame_nb);
+		//usleep(1);
+		tx_only(xsksi, &frame_nb);
 	}
 }
 
