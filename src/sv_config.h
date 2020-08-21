@@ -76,7 +76,7 @@ extern struct sSvOpt sv_opt;
 
 
 
-void parse_command_line(int argc, char **argv, struct sSvOpt *opt);
+struct sSvOpt* parse_command_line(int argc, char **argv);
 void parse_cfg_file(struct sSvOpt *opt);
 void usage(const char *prog);
 

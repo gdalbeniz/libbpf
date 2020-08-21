@@ -302,7 +302,6 @@ static void tx_only(struct sv_xdp_socket_info *xski, uint32_t *frame_nb)
 
 	if (!opt_need_wakeup || xsk_ring_prod__needs_wakeup(&xski->tx)) {
 		//kick tx
-		errno = 0;
 		int ret = sendto(xsk_socket__fd(xski->xsk), NULL, 0, MSG_DONTWAIT, NULL, 0);
 		if (ret < 0 && errno != ENOBUFS && errno != EAGAIN && errno != EBUSY) {
 			exit_with_error(errno);

@@ -2,11 +2,11 @@
 #define __SV_FRAMES__
 
 #include <stdint.h>
-struct sSvConf;
+struct sSvOpt;
 
 
 
-int32_t sv_prepare(uint8_t *samples, struct sSvConf *conf, uint32_t sv);
+int32_t sv_prepare(struct sSvOpt *opt, void *skt_info, uint32_t sv);
 void sv_frame_smpcnt(uint8_t *frame, uint16_t smp);
 
 

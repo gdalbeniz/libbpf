@@ -12,6 +12,7 @@ struct sSvPktSkt {
 		struct iovec iov[MAX_STREAMS];
 	} aux[SAMPLEWRAP];
 
+	uint32_t sv_num;
 	uint32_t pkt_sz;
 	uint32_t pkt_num;
 	uint8_t *pkt_area;
@@ -20,7 +21,9 @@ struct sSvPktSkt {
 	int32_t sleeptimes[16];
 	uint32_t tx_npkts;
 };
-extern struct sSvPktSkt sv_pkt_skt;
 
+void *pkt_skt_stats(void *arg);
+struct sSvPktSkt *sv_pkt_conf_skt(struct sSvOpt *opt);
+int32_t sv_pkt_send(struct sSvPktSkt *pkt_skt, uint32_t smp);
 
 #endif

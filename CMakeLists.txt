@@ -50,10 +50,13 @@ set(sv_injector_SRCS
    ini/ini.c
    src/sv_config.c
    src/sv_frames.c
+   src/sv_packet.c
+   src/sv_xdp.c
    src/sv_injector.c
 )
 add_executable(sv_injector
   ${sv_injector_SRCS}
+  ${libbpf_SRCS}
 )
 target_link_libraries(sv_injector
   PRIVATE m

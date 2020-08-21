@@ -75,12 +75,12 @@ static int ini_parse_handler(void* user, const char* section, const char* key, c
 	// new section
 	if (key == NULL) {
 		// sv stream
-		debug("--- new section (%d) = %s\n", opt->sv_num, section);
+		//debug("--- new section (%d) = %s\n", opt->sv_num, section);
 		if (opt->sv_num >= opt->sv_alloc) {
 			// allocate more space
 			opt->sv_alloc += 64;
 			opt->sv_conf = realloc(opt->sv_conf, opt->sv_alloc * sizeof(struct sSvConf));
-			debug("--- allocate total = %d\n", opt->sv_alloc);
+			//debug("--- allocate total = %d\n", opt->sv_alloc);
 		}
 		conf = &opt->sv_conf[opt->sv_num];
 		opt->sv_num++;
@@ -92,11 +92,11 @@ static int ini_parse_handler(void* user, const char* section, const char* key, c
 
 	// global default section
 	if (conf == NULL && *section == 0) {
-		debug("--- no section  -> default\n");
+		//debug("--- no section  -> default\n");
 		conf = &opt->def_conf;
 	}
 
-	debug("==> [%s] %s = %s\n", section, key, value);
+	//debug("==> [%s] %s = %s\n", section, key, value);
 
 	// fill key-value
 	if (MATCH(key, "mac")) {
@@ -105,8 +105,6 @@ static int ini_parse_handler(void* user, const char* section, const char* key, c
 			printf("error (line %d): not valid mac\n", lineno);
 			return 0; //error
 		}
-		debug("    parsed mac = %02x:%02x:%02x:%02x:%02x:%02x\n",
-			conf->mac[0], conf->mac[1], conf->mac[2], conf->mac[3], conf->mac[4], conf->mac[5]);
 	} else if (MATCH(key, "vlanId")) {
 		conf->vlanId = (uint16_t) strtol(value, NULL, 0);
 	} else if (MATCH(key, "vlanPrio")) {
@@ -115,10 +113,8 @@ static int ini_parse_handler(void* user, const char* section, const char* key, c
 		conf->appId = (uint16_t) strtol(value, NULL, 0);
 	} else if (MATCH(key, "svId")) {
 		snprintf(conf->svId, MAXLEN, value, section);
-		debug("    parsed svId = %s\n", conf->svId);
 	} else if (MATCH(key, "datSet")) {
 		snprintf(conf->datSet, MAXLEN, value, section);
-		debug("    parsed datSet = %s\n", conf->datSet);
 	} else if (MATCH(key, "confRev")) {
 		conf->confRev = (uint32_t) strtol(value, NULL, 0);
 	} else if (MATCH(key, "ia_mag")) {
@@ -184,23 +180,24 @@ static int ini_parse_handler(void* user, const char* section, const char* key, c
 
 void printSvOpt(struct sSvOpt *opt)
 {
+	if (!opt->debug) return;
+
 	debug("************ options ************\n");
 	debug("debug %d, iface %s, ifindex %d, mode %c, cfg %s, sv_limit %d, sv_num %d\n",
 		opt->debug, opt->iface, opt->ifindex, opt->mode, opt->cfg_file, opt->sv_limit, opt->sv_num);
-	if (opt->debug) {
-		for (int i = 0; i < opt->sv_num; i++) {
-			struct sSvConf *conf = opt->sv_conf + i;
-			debug("============ [%s] ===========\n", conf->section);
-			debug("mac: %02x:%02x:%02x:%02x:%02x:%02x, vlanPrio: %d, vlanId: %d, appId: 0x%04x\n",
-				conf->mac[0], conf->mac[1], conf->mac[2], conf->mac[3], conf->mac[4], conf->mac[5], conf->vlanPrio, conf->vlanId, conf->appId);
-			debug("svId: %s, datSet: %s, confRev: %d\n", conf->svId, conf->datSet, conf->confRev);
-			debug("ia: {%.1f, %.1f, 0x%04x}, ib: {%.1f, %.1f, 0x%04x}, ic: {%.1f, %.1f, 0x%04x}, in: {%.1f, %.1f, 0x%04x}\n",
-				conf->ia_mag, conf->ia_ang, conf->ia_q, conf->ib_mag, conf->ib_ang, conf->ib_q,
-				conf->ic_mag, conf->ic_ang, conf->ic_q, conf->in_mag, conf->in_ang, conf->in_q);
-			debug("va: {%.1f, %.1f, 0x%04x}, vb: {%.1f, %.1f, 0x%04x}, vc: {%.1f, %.1f, 0x%04x}, vn: {%.1f, %.1f, 0x%04x}\n",
-				conf->va_mag, conf->va_ang, conf->va_q, conf->vb_mag, conf->vb_ang, conf->vb_q,
-				conf->vc_mag, conf->vc_ang, conf->vc_q, conf->vn_mag, conf->vn_ang, conf->vn_q);
-		}
+
+	for (int i = 0; i < opt->sv_num; i++) {
+		struct sSvConf *conf = opt->sv_conf + i;
+		debug("============ [%s] ===========\n", conf->section);
+		debug("mac: %02x:%02x:%02x:%02x:%02x:%02x, vlanPrio: %d, vlanId: %d, appId: 0x%04x\n",
+			conf->mac[0], conf->mac[1], conf->mac[2], conf->mac[3], conf->mac[4], conf->mac[5], conf->vlanPrio, conf->vlanId, conf->appId);
+		debug("svId: %s, datSet: %s, confRev: %d\n", conf->svId, conf->datSet, conf->confRev);
+		debug("ia: {%.1f, %.1f, 0x%04x}, ib: {%.1f, %.1f, 0x%04x}, ic: {%.1f, %.1f, 0x%04x}, in: {%.1f, %.1f, 0x%04x}\n",
+			conf->ia_mag, conf->ia_ang, conf->ia_q, conf->ib_mag, conf->ib_ang, conf->ib_q,
+			conf->ic_mag, conf->ic_ang, conf->ic_q, conf->in_mag, conf->in_ang, conf->in_q);
+		debug("va: {%.1f, %.1f, 0x%04x}, vb: {%.1f, %.1f, 0x%04x}, vc: {%.1f, %.1f, 0x%04x}, vn: {%.1f, %.1f, 0x%04x}\n",
+			conf->va_mag, conf->va_ang, conf->va_q, conf->vb_mag, conf->vb_ang, conf->vb_q,
+			conf->vc_mag, conf->vc_ang, conf->vc_q, conf->vn_mag, conf->vn_ang, conf->vn_q);
 	}
 }
 
@@ -213,6 +210,7 @@ void parse_cfg_file(struct sSvOpt *opt)
 		printf("No config file!\n");
 		exit(EXIT_FAILURE);
 	}
+
 	int ret = ini_parse(opt->cfg_file, ini_parse_handler, opt);
 	if (ret < 0) {
 		printf("Can't read '%s'!\n", opt->cfg_file);
@@ -221,18 +219,18 @@ void parse_cfg_file(struct sSvOpt *opt)
 		printf("Bad config file (first error on line %d)!\n", ret);
 		exit(EXIT_FAILURE);
 	}
-	
+
 	if (opt->sv_num > MAX_STREAMS) {
 		printf("error: too many sv (%d > %d)\n",opt->sv_num, MAX_STREAMS);
 		exit(EXIT_FAILURE);
-	} else if ((opt->sv_num >opt->sv_limit) && (opt->sv_limit > 0)) {
+	} else if ((opt->sv_num > opt->sv_limit) && (opt->sv_limit > 0)) {
 		printf("Succesfully parsed %d SV streams. Limited to %d \n",opt->sv_num,opt->sv_limit);
 		opt->sv_num =opt->sv_limit;
 	} else {
 		printf("Succesfully parsed %d SV streams \n",opt->sv_num);
 	}
 
-	printSvOpt(opt);	
+	printSvOpt(opt);
 }
 
 
@@ -245,7 +243,7 @@ void parse_cfg_file(struct sSvOpt *opt)
 struct option long_options[] = {
 	{"pkt-sendmmsg", no_argument, 0, 'P'},
 	{"xdp-skb", no_argument, 0, 'S'},
-	{"xdp-native", no_argument, 0, 'N'},
+	{"xdp-native", no_argument, 0, 'X'},
 	{"interface", required_argument, 0, 'i'},
 	{"config", required_argument, 0, 'c'},
 	{"limit", required_argument, 0, 'l'},
@@ -268,7 +266,7 @@ void usage(const char *prog)
 		"  Options:\n"
 		"  -P, --pkt-sendmmsg   Use AF_PACKET mode\n"
 		"  -S, --xdp-skb        Use AF_XDP skb-mod\n"
-		"  -N, --xdp-native     Use AF_XDP native mode\n"
+		"  -X, --xdp-native     Use AF_XDP native mode\n"
 		"  -i, --interface=s    Run on interface 's'\n"
 		"  -c, --config=s       Configuration file='s'.\n"
 		"  -l, --limit=n        Limit number of streams to n\n"
@@ -286,16 +284,18 @@ void usage(const char *prog)
 	exit(EXIT_FAILURE);
 }
 
-void parse_command_line(int argc, char **argv, struct sSvOpt *opt)
+struct sSvOpt* parse_command_line(int argc, char **argv)
 {
+	struct sSvOpt *opt = calloc(1, sizeof(struct sSvOpt));
 	opt->xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST;
-    opt->interval = 1;
-    opt->xdp_bind_flags = XDP_USE_NEED_WAKEUP | XDP_COPY;
-    opt->xsk_frame_size = XSK_UMEM__DEFAULT_FRAME_SIZE;
-    opt->need_wakeup = true;
+	opt->interval = 1;
+	opt->xdp_bind_flags = XDP_USE_NEED_WAKEUP | XDP_COPY;
+	opt->xsk_frame_size = XSK_UMEM__DEFAULT_FRAME_SIZE;
+	opt->need_wakeup = true;
+	opt->mode = 'P';
 
 	for (;;) {
-		int c = getopt_long(argc, argv, "PSNi:c:l:dr:pn:zmf:u", long_options, NULL);
+		int c = getopt_long(argc, argv, "PSXi:c:l:dr:pn:zmf:u", long_options, NULL);
 		if (c == -1) {
 			break;
 		}
@@ -311,11 +311,11 @@ void parse_command_line(int argc, char **argv, struct sSvOpt *opt)
 			opt->poll = 1;
 			break;
 		case 'S':
-			opt->mode = 'S';
+			opt->mode = 'X';
 			opt->xdp_flags |= XDP_FLAGS_SKB_MODE;
 			break;
-		case 'N':
-			opt->mode = 'N';
+		case 'X':
+			opt->mode = 'X';
 			opt->xdp_flags |= XDP_FLAGS_DRV_MODE;
 			break;
 		case 'P':
@@ -367,4 +367,6 @@ void parse_command_line(int argc, char **argv, struct sSvOpt *opt)
 			opt->xsk_frame_size);
 		usage(basename(argv[0]));
 	}
+
+	return opt;
 }
