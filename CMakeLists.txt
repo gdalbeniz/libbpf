@@ -13,6 +13,8 @@ find_path(IEC61850_INCLUDE_DIR sv_publisher.h PATH_SUFFIXES libiec61850 REQUIRED
 find_library(IEC61850_LIBRARY libiec61850.a REQUIRED)
 find_library(IEC61850HAL_LIBRARY libhal.a REQUIRED)
 
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads REQUIRED)
 
 message("IEC61850_INCLUDE_DIR include dir = ${IEC61850_INCLUDE_DIR}")
 message("IEC61850_LIBRARY lib = ${IEC61850_LIBRARY}")
@@ -27,10 +29,6 @@ include_directories(
     ${IEC61850_INCLUDE_DIR}
 )
 
-set(xdpsock_sv_SRCS
-   src/xdpsock_user.c
-   src/main.c
-)
 set(libbpf_SRCS
    libbpf/bpf.c
    libbpf/netlink.c
@@ -38,13 +36,6 @@ set(libbpf_SRCS
    libbpf/xsk.c
    libbpf/libbpf_print.c
 )
-add_executable(xdpsock_sv
-  ${libbpf_SRCS}
-  ${xdpsock_sv_SRCS}
-)
-set(THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads REQUIRED)
-target_link_libraries(xdpsock_sv PRIVATE Threads::Threads)
 
 set(sv_injector_SRCS
    ini/ini.c
@@ -54,20 +45,18 @@ set(sv_injector_SRCS
    src/sv_xdp.c
    src/sv_injector.c
 )
+
 add_executable(sv_injector
   ${sv_injector_SRCS}
   ${libbpf_SRCS}
 )
+
 target_link_libraries(sv_injector
   PRIVATE m
   PRIVATE ${IEC61850_LIBRARY}
   PRIVATE ${IEC61850HAL_LIBRARY}
   PRIVATE Threads::Threads
 )
-
-
-
-install (TARGETS xdpsock_sv RUNTIME DESTINATION ${BINDIR} COMPONENT Applications)
 
 install (TARGETS sv_injector RUNTIME DESTINATION ${BINDIR} COMPONENT Applications)
 install (FILES test.ini DESTINATION etc COMPONENT Applications)

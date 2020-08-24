@@ -6,11 +6,12 @@
 
 struct sSvPktSkt {
 	int32_t socket;
+	int32_t ifindex;
+	struct sockaddr_ll address[MAX_STREAMS];
 	struct {
-		struct sockaddr_ll address[MAX_STREAMS];
 		struct mmsghdr msgvec[MAX_STREAMS];
 		struct iovec iov[MAX_STREAMS];
-	} aux[SAMPLEWRAP];
+	} aux[80];
 
 	uint32_t sv_num;
 	uint32_t pkt_sz;
@@ -24,6 +25,8 @@ struct sSvPktSkt {
 
 void *pkt_skt_stats(void *arg);
 struct sSvPktSkt *sv_pkt_conf_skt(struct sSvOpt *opt);
-int32_t sv_pkt_send(struct sSvPktSkt *pkt_skt, uint32_t smp);
+void sv_pkt_send(struct sSvPktSkt *pkt_skt, uint32_t smp, uint32_t cnt);
+void sv_pkt_send_all(struct sSvPktSkt *pkt_skt);
+void sv_pkt_store_frame(struct sSvPktSkt *pkt_skt, uint8_t *buffer, uint32_t bufLen, uint32_t sv, uint32_t smp);
 
 #endif

@@ -3,14 +3,17 @@
 
 #include <stdint.h>
 struct sSvOpt;
+struct sSvXdpSkt;
 
 
 
-int32_t sv_prepare(struct sSvOpt *opt, void *skt_info, uint32_t sv);
-void sv_frame_smpcnt(uint8_t *frame, uint16_t smp);
+
+int32_t sv_frame_prepare(struct sSvOpt *opt, void *skt_info, uint32_t sv);
+int32_t sv_frame_generate(struct sSvOpt *opt, struct sSvXdpSkt *xski, uint32_t sv);
+void sv_frame_smp_upd(uint8_t *frame, uint16_t smp);
 
 
-
+#define MAX_STREAMS 256
 #define FRAME_SIZE 126
 #define FRAME_NUM   80
 #define SVID_OFFSET 45

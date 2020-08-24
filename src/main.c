@@ -53,7 +53,7 @@ uint32_t opt_umem_flags;
 int opt_unaligned_chunks;
 int opt_mmap_flags;
 uint32_t opt_xdp_bind_flags;
-int opt_xsk_frame_size = XSK_UMEM__DEFAULT_FRAME_SIZE/2;
+int opt_xsk_frame_size = XSK_UMEM__DEFAULT_FRAME_SIZE / 2;
 int opt_timeout = 1000;
 bool opt_need_wakeup = true;
 int opt_debug = 1;

@@ -10,8 +10,8 @@
 #define PACKETSIZE (256)
 
 #define MAX_STREAMS (256)
-#define NUM_FRAMES (SAMPLEWRAP * PACKET_SIZE * MAX_STREAMS / XSK_UMEM__DEFAULT_FRAME_SIZE)
-#define BATCH_SIZE 100
+#define NUM_FRAMES (80 * MAX_STREAMS)
+
 
 struct sSvConf {
 	char section[MAXLEN];

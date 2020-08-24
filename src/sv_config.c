@@ -280,7 +280,7 @@ void usage(const char *prog)
 		"  -f, --frame-size=n   Set the frame size (must be a power of two in aligned mode, default is %d).\n"
 		"  -u, --unaligned      Enable unaligned chunk placement\n"
 		"\n";
-	fprintf(stderr, str, prog, XSK_UMEM__DEFAULT_FRAME_SIZE);
+	fprintf(stderr, str, prog, XSK_UMEM__DEFAULT_FRAME_SIZE/2);
 	exit(EXIT_FAILURE);
 }
 
@@ -290,7 +290,7 @@ struct sSvOpt* parse_command_line(int argc, char **argv)
 	opt->xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST;
 	opt->interval = 1;
 	opt->xdp_bind_flags = XDP_USE_NEED_WAKEUP | XDP_COPY;
-	opt->xsk_frame_size = XSK_UMEM__DEFAULT_FRAME_SIZE;
+	opt->xsk_frame_size = XSK_UMEM__DEFAULT_FRAME_SIZE / 2;
 	opt->need_wakeup = true;
 	opt->mode = 'P';
 
@@ -311,7 +311,7 @@ struct sSvOpt* parse_command_line(int argc, char **argv)
 			opt->poll = 1;
 			break;
 		case 'S':
-			opt->mode = 'X';
+			opt->mode = 'S';
 			opt->xdp_flags |= XDP_FLAGS_SKB_MODE;
 			break;
 		case 'X':

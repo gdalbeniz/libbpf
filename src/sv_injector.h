@@ -19,6 +19,10 @@
 #include <pthread.h>
 #include <getopt.h>
 
+#include <asm/barrier.h>
+#include <libgen.h>
+#include <linux/bpf.h>
+#include <linux/compiler.h>
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <unistd.h>

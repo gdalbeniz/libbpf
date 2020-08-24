@@ -59,8 +59,10 @@ static void int_exit(int sig)
 
 
 
-
-
+void tx_only(struct sSvXdpSkt *xski, uint32_t *frame_nb);
+void *poller(void *arg);
+void* sv_xdp_configure_socket3(void *opt);
+struct sSvXdpSkt* sv_xdp_configure_socket2(struct sSvOpt *opt, uint32_t num_frames, uint32_t frame_size);
 
 int main(int argc, char* argv[])
 {
@@ -78,7 +80,7 @@ int main(int argc, char* argv[])
 	if (opt_info->mode == 'P') {
 		pkt_skt_info = sv_pkt_conf_skt(opt_info);
 	} else /*if (opt_info->mode == 'X')*/ {
-		xdp_skt_info = sv_xdp_conf_skt(opt_info, 0, 0);
+		xdp_skt_info = sv_xdp_conf_skt(opt_info);
 	}
 
 	// set up process and stats thread
@@ -115,38 +117,16 @@ int main(int argc, char* argv[])
 		}
 	}
 
+
 	printf("==========================\n");
 	printf("start sending (estimated throughput: %d Kpps) \n", 4 * opt_info->sv_num);
 	printf("==========================\n");
 
-
-	// start sending
-
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-
-	for (;;) {
-		int32_t i = 0;
-		for (uint32_t smp = 0; smp < SAMPLEWRAP; smp++) {
-			// sleep until next 250us
-			clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
-			clock_addinterval(&ts, 250000);
-
-			// send packets
-			if (opt_info->mode == 'P') {
-				sv_pkt_send(pkt_skt_info, smp);
-				//sv_pkt_upd_smp(pkt_skt_info, smp+1);
-				if (smp % 400 == 0) {
-					pkt_skt_info->sleeptimes[i++] = clock_getdiff_us(&ts);
-				}
-			} else /*if (opt_info->mode == 'X')*/ {
-				sv_xdp_send(xdp_skt_info, smp);
-				//sv_xdp_upd_smp(pkt_skt_info, smp+1);
-				if (smp % 400 == 0) {
-					xdp_skt_info->sleeptimes[i++] = clock_getdiff_us(&ts);
-				}
-			}
-		}
+	// send packets
+	if (opt_info->mode == 'P') {
+		sv_pkt_send_all(pkt_skt_info);
+	} else /*if (opt_info->mode == 'X')*/ {
+		sv_xdp_send_all(xdp_skt_info);
 	}
 
 	return 0;

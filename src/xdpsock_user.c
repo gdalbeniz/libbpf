@@ -4,6 +4,7 @@
 #include <asm/barrier.h>
 #include <errno.h>
 #include <getopt.h>
+#include <time.h>
 #include <libgen.h>
 #include <linux/bpf.h>
 #include <linux/compiler.h>
@@ -52,8 +53,8 @@
 #define SAMPLEWRAP (4000)
 #define PACKET_SIZE (256)
 #define MAX_STREAMS (256)
-#define NUM_FRAMES (SAMPLEWRAP*PACKET_SIZE*MAX_STREAMS/XSK_UMEM__DEFAULT_FRAME_SIZE)
-#define BATCH_SIZE 100
+#define NUM_FRAMES (80 * MAX_STREAMS)
+#define BATCH_SIZE 128
 
 #define DEBUG_HEXDUMP 0
 #define MAX_SOCKS 8
@@ -97,6 +98,16 @@ struct sv_xdp_socket_info {
 };
 struct sv_xdp_socket_info *xsksi;
 
+
+
+void clock_addinterval(struct timespec *ts, uint64_t ns)
+{
+	ts->tv_nsec += ns;
+	while (ts->tv_nsec >= 1000000000UL) {
+		ts->tv_nsec -= 1000000000UL;
+		ts->tv_sec += 1;
+	}
+}
 
 
 unsigned long get_nsecs(void)
@@ -151,6 +162,7 @@ void dump_stats(void)
 	printf("%-15s %-11s %-11s %-11.2f\n", "", "pps", "pkts", dt / 1000000000.);
 	printf(fmt, "rx", rx_pps, xsksi->rx_npkts);
 	printf(fmt, "tx", tx_pps, xsksi->tx_npkts);
+	printf("%-15s %'-11lu\n", "outx", xsksi->outstanding_tx);
 
 	xsksi->prev_rx_npkts = xsksi->rx_npkts;
 	xsksi->prev_tx_npkts = xsksi->tx_npkts;
@@ -218,6 +230,8 @@ static struct sv_xdp_socket_info *sv_xdp_configure_socket(uint32_t num_frames, u
 	if (!xski) {
 		exit_with_error(errno);
 	}
+	
+	printf("mmap size %d\n", num_frames * frame_size);
 
 	// reserve memory for the umem. Use hugepages if unaligned chunk mode
 	xski->umem_area = mmap(NULL, num_frames * frame_size, PROT_READ | PROT_WRITE,
@@ -235,7 +249,8 @@ static struct sv_xdp_socket_info *sv_xdp_configure_socket(uint32_t num_frames, u
 		.frame_headroom = XSK_UMEM__DEFAULT_FRAME_HEADROOM,
 		.flags = opt_umem_flags
 	};
-	ret = xsk_umem__create(&xski->umem, xski->umem_area, num_frames * frame_size, &xski->fq, &xski->cq, &ucfg);
+	ret = xsk_umem__create(&xski->umem, xski->umem_area, num_frames * frame_size,
+							&xski->fq, &xski->cq, &ucfg);
 	if (ret) {
 		exit_with_error(-ret);
 	}
@@ -280,9 +295,7 @@ static void tx_only(struct sv_xdp_socket_info *xski, uint32_t *frame_nb)
 
 	int32_t ret = xsk_ring_prod__reserve(&xski->tx, BATCH_SIZE, &idx);
 	if (ret  == BATCH_SIZE) {
-		unsigned int i;
-
-		for (i = 0; i < BATCH_SIZE; i++) {
+		for (uint32_t i = 0; i < BATCH_SIZE; i++) {
 			xsk_ring_prod__tx_desc(&xski->tx, idx + i)->addr = (*frame_nb + i) * opt_xsk_frame_size;
 			xsk_ring_prod__tx_desc(&xski->tx, idx + i)->len = FRAME_SIZE;
 		}
@@ -291,6 +304,7 @@ static void tx_only(struct sv_xdp_socket_info *xski, uint32_t *frame_nb)
 		xski->outstanding_tx += BATCH_SIZE;
 		*frame_nb += BATCH_SIZE;
 		*frame_nb %= NUM_FRAMES;
+		printf("xsk_ring_prod__reserve ret %d\n", ret);
 	} else {
 		//printf("xsk_ring_prod__reserve ret %d\n", ret);
 	}
@@ -308,11 +322,12 @@ static void tx_only(struct sv_xdp_socket_info *xski, uint32_t *frame_nb)
 		}
 	}
 
-	uint32_t rcvd = xsk_ring_cons__peek(&xski->cq, BATCH_SIZE, &idx);
+	uint32_t rcvd = xsk_ring_cons__peek(&xski->cq, 256, &idx);
 	if (rcvd > 0) {
 		xsk_ring_cons__release(&xski->cq, rcvd);
 		xski->outstanding_tx -= rcvd;
 		xski->tx_npkts += rcvd;
+		printf("recogiendo cable %d\n", rcvd);
 	}
 }
 
@@ -336,6 +351,9 @@ void start_xdp(void)
 	fds.fd = xsk_socket__fd(xsksi->xsk);
 	fds.events = POLLOUT;
 
+	struct timespec ts;
+	clock_gettime(CLOCK_MONOTONIC, &ts);
+
 	for (;;) {
 		if (opt_poll) {
 			ret = poll(&fds, 1, 1000);
@@ -346,7 +364,10 @@ void start_xdp(void)
 				continue;
 		}
 
-		//usleep(1);
+		// sleep until next 250us
+		// clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+		// clock_addinterval(&ts, 250000);
+
 		tx_only(xsksi, &frame_nb);
 	}
 }
@@ -355,7 +376,7 @@ void start_xdp(void)
 
 void cleanup_xdp(void)
 {
-    struct xsk_umem *umem = xsksi->umem;
+	struct xsk_umem *umem = xsksi->umem;
 	xsk_socket__delete(xsksi->xsk);
 	(void)xsk_umem__delete(umem);
 	remove_xdp_program(xsksi->prog_id);
