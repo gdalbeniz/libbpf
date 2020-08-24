@@ -50,4 +50,7 @@ void debug(const char *fmt, ...);
 //void __exit_with_error(int error, const char *file, const char *func, int line);
 //#define exit_with_error(error) __exit_with_error(error, __FILE__, __func__, __LINE__)
 
+void clock_addinterval(struct timespec *ts, uint64_t ns);
+int32_t clock_getdiff_us(struct timespec *tsref);
+
 #endif
