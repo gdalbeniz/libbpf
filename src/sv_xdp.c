@@ -12,9 +12,9 @@ struct sSvXdpSkt *sv_xdp_conf_skt(struct sSvOpt *opt)
 	if (!xski) {
 		exit(EXIT_FAILURE);//exit_with_error(errno);
 	}
-	xski->sv_num = opt->sv_num;
+	xski->opt = opt;
 	xski->pkt_sz = opt->xsk_frame_size;
-	xski->pkt_num = 80 * xski->sv_num;
+	xski->pkt_num = 80 * opt->sv_num;
 
 	// reserve memory for the umem. Use hugepages if unaligned chunk mode
 	xski->umem_area = mmap(NULL, xski->pkt_num * xski->pkt_sz, PROT_READ | PROT_WRITE,
@@ -87,7 +87,7 @@ static inline
 uint8_t* sv_xdp_get_ptr(struct sSvXdpSkt *xdp_skt, uint32_t sv, uint32_t smp)
 {
 	// uint8_t umem_area[80][sv_num][pkt_sz]
-	return xdp_skt->umem_area + (smp * xdp_skt->sv_num + sv) * xdp_skt->pkt_sz;
+	return xdp_skt->umem_area + (smp * xdp_skt->opt->sv_num + sv) * xdp_skt->pkt_sz;
 }
 
 void sv_xdp_store_frame(struct sSvXdpSkt *xdp_skt, uint8_t *buffer, uint32_t bufLen, uint32_t sv, uint32_t smp)
@@ -163,13 +163,18 @@ void *xdp_skt_stats(void *arg)
 	struct sSvXdpSkt *xdp_skt = (struct sSvXdpSkt *) arg;
 
 	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
+	clock_gettime(CLOCK_REALTIME, &ts);
+
+	uint32_t to = ts.tv_sec;
+	if (xdp_skt->opt->timeout > 0 && xdp_skt->opt->timeout <= 600 && ts.tv_sec <= 0x60000000) {
+		to = ts.tv_sec + xdp_skt->opt->timeout;
+	}
 
 	for (;;) {
 		uint32_t prev_tx_npkts = xdp_skt->tx_npkts;
 
-		clock_addinterval(&ts, 1000000000);
-		clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+		if (++ts.tv_sec > to) exit(0);
+		clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &ts, NULL);
 
 		printf("xdp throughput: %d pps ; outstanding: %d ; sleep times: %d, %d, %d, %d, %d, %d, %d, %d, %d, %d us;\n",
 				xdp_skt->tx_npkts - prev_tx_npkts, xdp_skt->outstanding_tx,

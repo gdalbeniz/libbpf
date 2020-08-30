@@ -6,14 +6,12 @@
 
 struct sSvPktSkt {
 	int32_t socket;
-	int32_t ifindex;
 	struct sockaddr_ll address[MAX_STREAMS];
 	struct {
 		struct mmsghdr msgvec[MAX_STREAMS];
 		struct iovec iov[MAX_STREAMS];
 	} aux[80];
 
-	uint32_t sv_num;
 	uint32_t pkt_sz;
 	uint32_t pkt_num;
 	uint8_t *pkt_area;
@@ -21,6 +19,8 @@ struct sSvPktSkt {
 	//stats
 	int32_t sleeptimes[16];
 	uint32_t tx_npkts;
+
+	struct sSvOpt *opt;
 };
 
 void *pkt_skt_stats(void *arg);

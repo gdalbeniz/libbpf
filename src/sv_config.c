@@ -2,6 +2,7 @@
 #include "sv_config.h"
 #include "ini.h"
 
+extern char __debug__;
 
 #define MATCH(a,b) (!strcmp(a?a:"", b?b:""))
 
@@ -75,12 +76,12 @@ static int ini_parse_handler(void* user, const char* section, const char* key, c
 	// new section
 	if (key == NULL) {
 		// sv stream
-		//debug("--- new section (%d) = %s\n", opt->sv_num, section);
+		debug("--- new section (%d) = %s\n", opt->sv_num, section);
 		if (opt->sv_num >= opt->sv_alloc) {
 			// allocate more space
 			opt->sv_alloc += 64;
 			opt->sv_conf = realloc(opt->sv_conf, opt->sv_alloc * sizeof(struct sSvConf));
-			//debug("--- allocate total = %d\n", opt->sv_alloc);
+			debug("--- allocate total = %d\n", opt->sv_alloc);
 		}
 		conf = &opt->sv_conf[opt->sv_num];
 		opt->sv_num++;
@@ -92,11 +93,11 @@ static int ini_parse_handler(void* user, const char* section, const char* key, c
 
 	// global default section
 	if (conf == NULL && *section == 0) {
-		//debug("--- no section  -> default\n");
+		debug("--- no section  -> default\n");
 		conf = &opt->def_conf;
 	}
 
-	//debug("==> [%s] %s = %s\n", section, key, value);
+	debug("==> [%s] %s = %s\n", section, key, value);
 
 	// fill key-value
 	if (MATCH(key, "mac")) {
@@ -241,17 +242,18 @@ void parse_cfg_file(struct sSvOpt *opt)
 
 
 struct option long_options[] = {
-	{"pkt-sendmmsg", no_argument, 0, 'P'},
+	{"packet", no_argument, 0, 'P'},
 	{"xdp-skb", no_argument, 0, 'S'},
 	{"xdp-native", no_argument, 0, 'X'},
 	{"interface", required_argument, 0, 'i'},
 	{"config", required_argument, 0, 'c'},
-	{"limit", required_argument, 0, 'l'},
+	{"nstreams", required_argument, 0, 'n'},
 	{"debug", no_argument, 0, 'd'},
 	{"rt-prio", required_argument, 0, 'r'},
-
+	{"timeout", required_argument, 0, 't'},
+	{"help", no_argument, 0, 'h'},
 	{"poll", no_argument, 0, 'p'},
-	{"interval", required_argument, 0, 'n'},
+	{"interval", required_argument, 0, 'j'},
 	{"zero-copy", no_argument, 0, 'z'},
 	{"no-need-wakeup", no_argument, 0, 'm'},
 	{"frame-size", required_argument, 0, 'f'},
@@ -264,23 +266,24 @@ void usage(const char *prog)
 	const char *str =
 		"  Usage: %s [OPTIONS]\n"
 		"  Options:\n"
-		"  -P, --pkt-sendmmsg   Use AF_PACKET mode\n"
+		"  -P, --packet         Use AF_PACKET mode\n"
 		"  -S, --xdp-skb        Use AF_XDP skb-mod\n"
 		"  -X, --xdp-native     Use AF_XDP native mode\n"
 		"  -i, --interface=s    Run on interface 's'\n"
 		"  -c, --config=s       Configuration file='s'.\n"
-		"  -l, --limit=n        Limit number of streams to n\n"
-		"  -d, --debug          Debug\n"
+		"  -n, --nstreams=n     Limit number of streams to n\n"
+		"  -t, --timeout=n      Limit execution time to n seconds\n"
 		"  -r, --rt-prio=n      Set RT priority to n\n"
-
-		"  -p, --poll           Use poll syscall\n"
-		"  -n, --interval=n     Specify statistics update interval (default 1 sec).\n"
-		"  -z, --zero-copy      Force zero-copy mode.\n"
-		"  -m, --no-need-wakeup Turn off use of driver need wakeup flag.\n"
-		"  -f, --frame-size=n   Set the frame size (must be a power of two in aligned mode, default is %d).\n"
-		"  -u, --unaligned      Enable unaligned chunk placement\n"
-		"\n";
-	fprintf(stderr, str, prog, XSK_UMEM__DEFAULT_FRAME_SIZE/2);
+		"  -d, --debug          Debug\n"
+		"  -h, --help           Show usage\n"
+		// "  -p, --poll           Use poll syscall\n"
+		// "  -j, --interval=n     Specify statistics update interval (default 1 sec).\n"
+		// "  -z, --zero-copy      Force zero-copy mode.\n"
+		// "  -m, --no-need-wakeup Turn off use of driver need wakeup flag.\n"
+		// "  -f, --frame-size=n   Set the frame size (must be a power of two in aligned mode).\n"
+		// "  -u, --unaligned      Enable unaligned chunk placement\n"
+		"\n  e.g. # %s -i eth0 -c test.ini -r 1 -n 100\n\n";
+	fprintf(stderr, str, prog, prog);
 	exit(EXIT_FAILURE);
 }
 
@@ -293,9 +296,10 @@ struct sSvOpt* parse_command_line(int argc, char **argv)
 	opt->xsk_frame_size = XSK_UMEM__DEFAULT_FRAME_SIZE / 2;
 	opt->need_wakeup = true;
 	opt->mode = 'P';
+	opt->timeout = 600;
 
 	for (;;) {
-		int c = getopt_long(argc, argv, "PSXi:c:l:dr:pn:zmf:u", long_options, NULL);
+		int c = getopt_long(argc, argv, "PSXi:c:n:dhr:t:pj:zmf:u", long_options, NULL);
 		if (c == -1) {
 			break;
 		}
@@ -303,6 +307,7 @@ struct sSvOpt* parse_command_line(int argc, char **argv)
 		switch (c) {
 		case 'd':
 			opt->debug = true;
+			__debug__ = true;
 			break;
 		case 'i':
 			opt->iface = optarg;
@@ -322,13 +327,13 @@ struct sSvOpt* parse_command_line(int argc, char **argv)
 			opt->mode = 'P';
 			break;
 		case 'n':
-			opt->interval = atoi(optarg);
-			break;
-		case 'l':
 			opt->sv_limit = atoi(optarg);
 			break;
 		case 'r':
 			opt->rt_prio = atoi(optarg);
+			break;
+		case 't':
+			opt->timeout = atoi(optarg);
 			break;
 		case 'z':
 			opt->xdp_bind_flags |= XDP_ZEROCOPY;
@@ -342,18 +347,21 @@ struct sSvOpt* parse_command_line(int argc, char **argv)
 			opt->unaligned_chunks = 1;
 			opt->mmap_flags = MAP_HUGETLB;
 			break;
-		// case 'F':
-		// 	opt->xdp_flags &= ~XDP_FLAGS_UPDATE_IF_NOEXIST;
-		// 	break;
 		case 'f':
 			opt->xsk_frame_size = atoi(optarg);
 		case 'm':
 			opt->need_wakeup = false;
 			opt->xdp_bind_flags &= ~XDP_USE_NEED_WAKEUP;
 			break;
+		case 'h':
+			usage(basename(argv[0]));
 		default:
 			usage(basename(argv[0]));
 		}
+	}
+
+	if (!opt->iface || !opt->cfg_file) {
+		usage(basename(argv[0]));
 	}
 
 	opt->ifindex = if_nametoindex(opt->iface);

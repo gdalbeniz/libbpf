@@ -14,7 +14,6 @@ struct sSvXdpSkt {
 	struct xsk_umem *umem;
 	uint8_t *umem_area;
 
-	uint32_t sv_num;
 	uint32_t pkt_sz;
 	uint32_t pkt_num;
 	uint32_t bufLen;//hack, len of 1 packet
@@ -25,6 +24,8 @@ struct sSvXdpSkt {
 	uint32_t outstanding_tx;
 	uint32_t prog_id;
 	int32_t sleeptimes[16];
+
+	struct sSvOpt *opt;
 };
 
 void *xdp_skt_stats(void *arg);

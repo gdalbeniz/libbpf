@@ -4,10 +4,11 @@
 #include "sv_packet.h"
 #include "sv_xdp.h"
 
-
+char __debug__ = 0;
 
 void debug(const char *fmt, ...)
 {
+	if (!__debug__) return;
 	va_list myargs;
 	va_start(myargs, fmt);
 	vfprintf(stderr, fmt, myargs);
@@ -48,8 +49,6 @@ uint64_t clock_gettime_ns(void)
 
 
 
-
-
 static void int_exit(int sig)
 {
 	(void)sig;
@@ -58,11 +57,6 @@ static void int_exit(int sig)
 }
 
 
-
-void tx_only(struct sSvXdpSkt *xski, uint32_t *frame_nb);
-void *poller(void *arg);
-void* sv_xdp_configure_socket3(void *opt);
-struct sSvXdpSkt* sv_xdp_configure_socket2(struct sSvOpt *opt, uint32_t num_frames, uint32_t frame_size);
 
 int main(int argc, char* argv[])
 {

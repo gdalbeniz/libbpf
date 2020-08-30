@@ -65,6 +65,7 @@ struct sSvOpt {
 	const char *cfg_file;
 	uint32_t sv_limit;
 	uint32_t rt_prio;
+	uint32_t timeout;
 
 	struct sSvConf def_conf;
 	struct sSvConf *sv_conf;
