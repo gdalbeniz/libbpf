@@ -1,3 +1,8 @@
+/* Copyright (C) Oier Garcia de Albeniz Lopez - All Rights Reserved
+ * Unauthorized copying of this file, via any medium is strictly prohibited
+ * Proprietary and confidential
+ * Written by Oier Garcia de Albeniz Lopez <g.albeniz@gmail.com>, September 2020
+ */
 #ifndef __SV_XDP__
 #define __SV_XDP__
 
