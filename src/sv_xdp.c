@@ -128,7 +128,7 @@ void sv_xdp_send(struct sSvXdpSkt *xski, uint32_t *frame_nb, uint32_t batch_sz)
 		return;
 	}
 
-	if (1/*!opt_need_wakeup*/ || xsk_ring_prod__needs_wakeup(&xski->tx)) {
+	if (1/*!opt->need_wakeup*/ || xsk_ring_prod__needs_wakeup(&xski->tx)) {
 		//kick tx
 		int ret = sendto(xsk_socket__fd(xski->xsk), NULL, 0, MSG_DONTWAIT, NULL, 0);
 		if (ret < 0 && errno != ENOBUFS && errno != EAGAIN && errno != EBUSY) {
@@ -141,7 +141,6 @@ void sv_xdp_send(struct sSvXdpSkt *xski, uint32_t *frame_nb, uint32_t batch_sz)
 		xsk_ring_cons__release(&xski->cq, rcvd);
 		xski->outstanding_tx -= rcvd;
 		xski->tx_npkts += rcvd;
-		//printf("recogiendo cable %d\n", rcvd);
 	}
 }
 
