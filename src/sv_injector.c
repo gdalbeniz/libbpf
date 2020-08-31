@@ -37,21 +37,6 @@ int32_t clock_getdiff_us(struct timespec *tsref)
 	clock_gettime(CLOCK_MONOTONIC, &ts);
 	return ((tsref->tv_sec - ts.tv_sec)) * 1000000L + ((tsref->tv_nsec - ts.tv_nsec) / 1000L);
 }
-//??? needed ???
-uint64_t clock_gettime_ms()
-{
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return ts.tv_sec * 1000UL + ts.tv_nsec / 1000000UL;
-}
-//??? needed ???
-uint64_t clock_gettime_ns(void)
-{
-	struct timespec ts;
-	clock_gettime(CLOCK_MONOTONIC, &ts);
-	return ts.tv_sec * 1000000000UL + ts.tv_nsec;
-}
-
 
 
 static void int_exit(int sig)
@@ -60,7 +45,6 @@ static void int_exit(int sig)
 	printf("exiting\n");
 	exit(EXIT_SUCCESS);
 }
-
 
 
 int main(int argc, char* argv[])
@@ -115,7 +99,6 @@ int main(int argc, char* argv[])
 			exit(-1);//exit_with_error(ret);
 		}
 	}
-
 
 	printf("==========================\n");
 	printf("start sending (estimated throughput: %d Kpps) \n", 4 * opt_info->sv_num);
