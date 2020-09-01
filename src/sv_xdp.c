@@ -129,10 +129,6 @@ void sv_xdp_send(struct sSvXdpSkt *xski, uint32_t *frame_nb, uint32_t batch_sz)
 		}
 	}
 
-	if (!xski->outstanding_tx) {
-		return;
-	}
-
 	if (1/*!opt->need_wakeup*/ || xsk_ring_prod__needs_wakeup(&xski->tx)) {
 		//kick tx
 		int ret = sendto(xsk_socket__fd(xski->xsk), NULL, 0, MSG_DONTWAIT, NULL, 0);
@@ -180,10 +176,8 @@ void *xdp_skt_stats(void *arg)
 		if (++ts.tv_sec > to) exit(0);
 		clock_nanosleep(CLOCK_REALTIME, TIMER_ABSTIME, &ts, NULL);
 
-		printf("xdp throughput: %d pps ; outstanding: %d ; sleep times: %d, %d, %d, %d, %d, %d, %d, %d, %d, %d us;\n",
-				xdp_skt->tx_npkts - prev_tx_npkts, xdp_skt->outstanding_tx,
-				xdp_skt->sleeptimes[0], xdp_skt->sleeptimes[1], xdp_skt->sleeptimes[2], xdp_skt->sleeptimes[3], xdp_skt->sleeptimes[4],
-				xdp_skt->sleeptimes[5], xdp_skt->sleeptimes[6], xdp_skt->sleeptimes[7], xdp_skt->sleeptimes[8], xdp_skt->sleeptimes[9]);
+		printf("xdp throughput: %d pps ; outstanding: %d ; \n",
+				xdp_skt->tx_npkts - prev_tx_npkts, xdp_skt->outstanding_tx);
 	}
 	return NULL;
 }
