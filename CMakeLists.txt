@@ -1,13 +1,13 @@
-# XXXXXXX
 
 cmake_minimum_required (VERSION 3.16)
 
-set(LIBBPF_VERSION_MAJOR "0")
-set(LIBBPF_VERSION_MINOR "0")
-set(LIBBPF_VERSION_REVISION "9")
-set(LIBBPF_VERSION ${LIBBPF_VERSION_MAJOR}.${LIBBPF_VERSION_MINOR}.${LIBBPF_VERSION_REVISION})
+set(SVINJECTOR_VERSION_MAJOR "0")
+set(SVINJECTOR_VERSION_MINOR "99")
+set(SVINJECTOR_VERSION ${SVINJECTOR_VERSION_MAJOR}.${SVINJECTOR_VERSION_MINOR})
 
-project(libbpf VERSION ${LIBBPF_VERSION} LANGUAGES C)
+add_compile_definitions(SVINJECTOR_VERSION="${SVINJECTOR_VERSION}")
+
+project(sv_injector VERSION ${SVINJECTOR_VERSION} LANGUAGES C)
 
 find_path(IEC61850_INCLUDE_DIR sv_publisher.h PATH_SUFFIXES libiec61850 REQUIRED)
 find_library(IEC61850_LIBRARY libiec61850.a REQUIRED)
@@ -15,10 +15,6 @@ find_library(IEC61850HAL_LIBRARY libhal.a REQUIRED)
 
 set(THREADS_PREFER_PTHREAD_FLAG ON)
 find_package(Threads REQUIRED)
-
-message("IEC61850_INCLUDE_DIR include dir = ${IEC61850_INCLUDE_DIR}")
-message("IEC61850_LIBRARY lib = ${IEC61850_LIBRARY}")
-message("IEC61850HAL_LIBRARY lib = ${IEC61850HAL_LIBRARY}")
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
@@ -37,8 +33,11 @@ set(libbpf_SRCS
    libbpf/libbpf_print.c
 )
 
-set(sv_injector_SRCS
+set(ini_SRCS
    ini/ini.c
+)
+
+set(sv_injector_SRCS
    src/sv_config.c
    src/sv_frames.c
    src/sv_packet.c
@@ -48,6 +47,7 @@ set(sv_injector_SRCS
 
 add_executable(sv_injector
   ${sv_injector_SRCS}
+  ${ini_SRCS}
   ${libbpf_SRCS}
 )
 

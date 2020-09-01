@@ -269,17 +269,18 @@ struct option long_options[] = {
 
 void usage(const char *prog)
 {
-	const char *str =
-		"  Usage: %s [OPTIONS]\n"
+	fprintf(stderr,
+		"  Usage: %s -i <i> -c <c> [-PSXdh] [-n <n>] [-t <t>] [-r <r>]\n"
+		"  Version: %s\n"
 		"  Options:\n"
 		"  -P, --packet         Use AF_PACKET mode\n"
 		"  -S, --xdp-skb        Use AF_XDP skb-mod\n"
 		"  -X, --xdp-native     Use AF_XDP native mode\n"
-		"  -i, --interface=s    Run on interface 's'\n"
-		"  -c, --config=s       Configuration file='s'.\n"
-		"  -n, --nstreams=n     Limit number of streams to n\n"
-		"  -t, --timeout=n      Limit execution time to n seconds\n"
-		"  -r, --rt-prio=n      Set RT priority to n\n"
+		"  -i, --interface=i    Run on interface 'i'\n"
+		"  -c, --config=c       Configuration file='c'.\n"
+		"  -n, --nstreams=n     Limit number of streams to 'n'\n"
+		"  -t, --timeout=t      Limit execution time to 't' seconds\n"
+		"  -r, --rt-prio=r      Set RT priority to 'r'\n"
 		"  -d, --debug          Debug\n"
 		"  -h, --help           Show usage\n"
 		// "  -p, --poll           Use poll syscall\n"
@@ -288,8 +289,8 @@ void usage(const char *prog)
 		// "  -m, --no-need-wakeup Turn off use of driver need wakeup flag.\n"
 		// "  -f, --frame-size=n   Set the frame size (must be a power of two in aligned mode).\n"
 		// "  -u, --unaligned      Enable unaligned chunk placement\n"
-		"\n  e.g. # %s -i eth0 -c test.ini -r 1 -n 100\n\n";
-	fprintf(stderr, str, prog, prog);
+		"\n",
+		prog, SVINJECTOR_VERSION);
 	exit(EXIT_FAILURE);
 }
 
