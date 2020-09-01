@@ -211,7 +211,7 @@ void printSvOpt(struct sSvOpt *opt)
 
 
 
-void parse_cfg_file(struct sSvOpt *opt)
+void sv_config_parse_ini(struct sSvOpt *opt)
 {
 	if (opt->cfg_file == NULL) {
 		printf("No config file!\n");
@@ -294,7 +294,7 @@ void usage(const char *prog)
 	exit(EXIT_FAILURE);
 }
 
-struct sSvOpt* parse_command_line(int argc, char **argv)
+struct sSvOpt* sv_config_parse_cli(int argc, char **argv)
 {
 	struct sSvOpt *opt = calloc(1, sizeof(struct sSvOpt));
 	opt->xdp_flags = XDP_FLAGS_UPDATE_IF_NOEXIST;

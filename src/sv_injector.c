@@ -56,8 +56,8 @@ int main(int argc, char* argv[])
 	struct sSvXdpSkt *xdp_skt_info;
 
 	// parse cli and cfg
-	opt_info = parse_command_line(argc, argv);
-	parse_cfg_file(opt_info);
+	opt_info = sv_config_parse_cli(argc, argv);
+	sv_config_parse_ini(opt_info);
 
 	// init socket and prepare frames
 	if (opt_info->mode == 'P') {
@@ -100,14 +100,12 @@ int main(int argc, char* argv[])
 		}
 	}
 
-	printf("==========================\n");
-	printf("start sending (estimated throughput: %d Kpps) \n", 4 * opt_info->sv_num);
-	printf("==========================\n");
-
 	// send packets
 	if (opt_info->mode == 'P') {
+		printf("start sending (estimated throughput: %d Kpps) \n", 4 * opt_info->sv_num);
 		sv_pkt_send_all(pkt_skt_info);
 	} else /*if (opt_info->mode == 'X')*/ {
+		printf("start sending (unbounded throughput) \n");
 		sv_xdp_send_all(xdp_skt_info);
 	}
 
