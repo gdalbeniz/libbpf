@@ -20,7 +20,7 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
     ${CMAKE_CURRENT_SOURCE_DIR}/include/uapi
     ${CMAKE_CURRENT_SOURCE_DIR}/src
-    ${CMAKE_CURRENT_SOURCE_DIR}/ini
+    ${CMAKE_CURRENT_SOURCE_DIR}/inih
     ${CMAKE_CURRENT_SOURCE_DIR}/libbpf
     ${IEC61850_INCLUDE_DIR}
 )
@@ -33,8 +33,8 @@ set(libbpf_SRCS
    libbpf/libbpf_print.c
 )
 
-set(ini_SRCS
-   ini/ini.c
+set(inih_SRCS
+   inih/ini.c
 )
 
 set(sv_injector_SRCS
@@ -47,7 +47,7 @@ set(sv_injector_SRCS
 
 add_executable(sv_injector
   ${sv_injector_SRCS}
-  ${ini_SRCS}
+  ${inih_SRCS}
   ${libbpf_SRCS}
 )
 
